@@ -1,4 +1,3 @@
-#!/nfs/production3/ma/home/atlas3-production/sw/bin/python3.7
 # Filename: utils.py
 
 from datetime import datetime
