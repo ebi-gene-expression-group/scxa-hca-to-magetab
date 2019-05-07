@@ -1,0 +1,241 @@
+# HCA JSON to MageTab Translation Config
+
+idf:
+# Experiment title/description
+  - - 'MAGE-TAB Version'
+    - '1.1'
+  - - 'Investigation Title'
+    - ['project_0', 'project_core', 'project_title']
+  - - 'Comment[Submitted Name]'
+    - ['project_0', 'project_core', 'project_short_name']
+  - - 'Experiment Description'
+    - ['project_0', 'project_core', 'project_description']
+# Public Release date - special parsing in code
+  - - 'Public Release Date'
+    - ['project_0', 'provenance', 'submission_date']
+# Contributors - special parsing in code
+  - - ['Person Last Name', 'Person First Name', 'Person Mid Initials', 'Person Email', 'Person Affiliation', 'Person Address']
+    - ['project_0', 'contributors']
+# As HCA doesn't identify submitters, the first contributor will be identified as a submitter be default
+  - - 'Person Roles'
+    - 'submitter'
+# Protocols - special handling in code
+  - - ['Protocol Name', 'Protocol Description', 'Protocol Type']
+    - []
+# References - special handling in code (spaces converted to tabs)
+  - - 'Term Source Name'
+    - ['EFO', 'ArrayExpress']
+  - - 'Term Source File'
+    - ['http://www.ebi.ac.uk/efo/efo.owl', 'http://www.ebi.ac.uk/arrayexpress/']
+# Publications - - special parsing in code
+  - - ['Publication Title', 'Publication Author List', 'PubMed ID', 'Publication DOI']
+    - ['project_0', 'publications']
+# Experiment Type
+  - - 'Comment[AEExperimentType]'
+    - 'RNA-seq of coding RNA from single cells'
+# ArrayExpress/Expression Atlas fields that need curation
+  - - 'Experimental Factor Name'
+    - []
+  - - 'Experimental Factor Type'
+    - []
+  - - 'Comment[EAAdditionalAttributes]'
+    - 'CURATE'
+  - - 'Comment[EACurator]'
+    - 'CURATE'
+  - - 'Comment[EAExpectedClusters]'
+    - 'CURATE'
+# Accession - special handling (use gxa's generated accession if missing from HCA json)
+  - - 'Comment[ExpressionAtlasAccession]'
+    - []
+# This is the date of the latest import from HCA - special handling
+  - - 'Comment[HCALastUpdateDate]'
+    - []
+# Secondary accessions
+  - - 'Comment[SecondaryAccession]'
+    - []
+# SDRF File reference - special handling in code
+  - - 'SDRF File'
+    - []
+
+sdrf:
+  - - 'Source Name'
+# According for Silvie, this should work fine for Smart-seq2 (each well contains a cell that is considered a single biological replicate)
+# When we come to processing 10x experiments, there is a concept of single (multi-cell) biological sample that is later (e.g. FACS-)separated into
+# individual cells. We will then need to find out where in HCA json an id, unique to the above multi-cell sample is stored, and take it from there.
+    - ['cell_suspension_0', 'biomaterial_core', 'biomaterial_id']
+# HCA bundle uuid - special handling - assign the uuid of the current bundle
+  - - 'Comment[HCA bundle uuid]'
+    - []
+  - - 'Comment[HCA file uuid]'
+    - ['provenance','document_id']    
+  - - 'Comment[Sample_description]'
+    - ['specimen_from_organism_0', 'biomaterial_core', 'biomaterial_description']
+  - - 'Comment[biomaterial name]'
+    - ['specimen_from_organism_0', 'biomaterial_core', 'biomaterial_name']
+  - - 'Characteristics[immunophenotype]'
+    - ['enrichment_protocol', 'markers']
+  - - 'Comment[plate id]'
+    - ['cell_suspension_0', 'plate_based_sequencing', 'plate_id']
+  - - 'Comment [well]'
+    - ['cell_suspension_0', 'plate_based_sequencing', 'well_id']
+  - - 'Characteristics[age]'
+    - ['donor_organism_0', 'organism_age']
+  - - 'Unit [time unit]'
+    - ['donor_organism_0', 'organism_age_unit', 'text']
+  - - 'Characteristics[biosource provider]'
+    - ['specimen_from_organism_0', 'purchased_specimen', 'manufacturer']
+  - - 'Characteristics[body mass index]'
+    - ['donor_organism_0', 'human_specific', 'body_mass_index']
+  - - 'Unit[concentration unit]'
+    - ''
+  - - 'Characteristics[cause of death]'
+    - ['donor_organism_0', 'death', 'cause_of_death']
+  - - 'Characteristics[cell line]'
+    - ['cell_line_0', 'biomaterial_core', 'biomaterial_name']
+  - - 'Characteristics[cell subtype surface markers]'
+    - ['enrichment_protocol', 'markers']
+  - - 'Characteristics[cell subtype]'
+    - ['cell_suspension_0', 'selected_cell_type']
+  - - 'Characteristics[cell type]'
+    - ['cell_line_0', 'cell_type', 'text']
+  - - 'Characteristics[clinical information]'
+    - ['donor_organism_0', 'medical_history', 'test_results']
+  - - 'Characteristics[disease]'
+    - ['donor_organism_0', 'diseases']
+  - - 'Characteristics[ethnic group]'
+    - ['donor_organism_0', 'human_specific', 'ethnicity']
+  - - 'Characteristics[genotype]'
+    - ['(specimen\_from\_organism|cell\_suspension|cell\_line|donor\_organism)\_0', 'biomaterial_core', 'genotype']
+  - - 'Characteristics[geographical location]'
+    - ['process\_\d', 'process_core', 'process_location']
+  - - 'Characteristics[individual]'
+    - ['donor_organism_0', 'biomaterial_core', 'biomaterial_id']
+  - - 'Characteristics[developmental stage]'
+    - ['donor_organism_0', 'development_stage', 'text']
+  - - 'Characteristics[organism part]'
+    - ['specimen_from_organism_0', 'organ', 'text']
+  - - 'Characteristics[organism status]'
+    - ['donor_organism_0', 'is_living']
+  - - 'Characteristics[organism]'
+    - ['specimen_from_organism_0', 'genus_species']
+  - - 'Characteristics[phenotype]'
+    - ''
+  - - 'Characteristics[sampling site]'
+    - ''
+  - - 'Characteristics[sex]'
+    - ['donor_organism_0', 'sex']
+  - - 'Characteristics[single cell quality]'
+    - ['cell_suspension_0', 'plate_based_sequencing', 'cell_quality']
+  - - 'Characteristics[strain]'
+    - ['donor_organism_0', 'mouse_specific', 'strain']
+  - - 'Characteristics[submitted single cell quality]'
+    - ['cell_suspension_0', 'plate_based_sequencing', 'cell_quality']
+  - - 'Material Type'
+    - 'cell'
+# Protocols - special handling in code
+  - - 'Protocol REF'
+    - ['differentiation_protocol']
+# Protocols - special handling in code
+  - - 'Protocol REF'
+    - ['dissociation_protocol']
+# Protocols - special handling in code
+  - - 'Protocol REF'
+    - ['enrichment_protocol']
+# Protocols - special handling in code
+  - - 'Protocol REF'
+    - ['library_preparation_protocol']
+  - - 'Extract Name'
+    - ['cell_suspension_0', 'biomaterial_core', 'biomaterial_id']  
+  - - 'Comment[single cell isolation]'
+    - ['enrichment_protocol', 'enrichment_method', 'text']
+  - - 'Comment[input molecule]'
+    - ['library_preparation_protocol', 'input_nucleic_acid_molecule', 'text']
+  - - 'Comment[library construction]'
+    - ['library_preparation_protocol', 'library_construction_approach', 'text']
+  - - 'Comment[end bias]'
+    - ['library_preparation_protocol', 'end_bias']
+  - - 'Comment[primer]'
+    - ['library_preparation_protocol', 'primer']
+  - - 'Comment[spike in]'
+    - ['library_preparation_protocol', 'spike_in_kit', 'retail_name']
+  - - 'Comment[spike in dilution]'
+    - ['library_preparation_protocol', 'dilution']
+  - - 'Comment[umi barcode read]'
+    - ['library_preparation_protocol', 'umi_barcode', 'barcode_read']
+  - - 'Comment[umi barcode offset]'
+    - ['library_preparation_protocol', 'umi_barcode', 'barcode_offset']
+  - - 'Comment[umi barcode size]'
+    - ['library_preparation_protocol', 'umi_barcode', 'barcode_length']
+  - - 'Comment[cell barcode read]'
+    - ['library_preparation_protocol', 'cell_barcode', 'barcode_read']
+  - - 'Comment[cell barcode offset]'
+    - ['library_preparation_protocol', 'cell_barcode', 'barcode_offset']
+  - - 'Comment[cell barcode size]'
+    - ['library_preparation_protocol', 'cell_barcode', 'barcode_length']
+  - - 'Comment[cell barcode file]'
+    - ['library_preparation_protocol', 'cell_barcode', 'white_list_file']
+  - - 'Comment[LIBRARY_STRAND]'
+    - ['library_preparation_protocol', 'strand']
+  - - 'Comment[LIBRARY_LAYOUT]'
+    - ['sequencing_protocol', 'paired_end']
+  - - 'Comment[LIBRARY_SOURCE]'
+    - 'transcriptomic single cell'
+  - - 'Comment[LIBRARY_STRATEGY]'
+    - 'RNA-Seq'
+  - - 'Comment[LIBRARY_SELECTION]'
+    - 'cDNA'
+  - - 'Comment[INSTRUMENT_MODEL]'
+    - ['sequencing_protocol', 'instrument_manufacturer_model', 'text']
+  - - 'Comment[NOMINAL_LENGTH]'
+    - ['library_preparation_protocol', 'nominal_length']
+  - - 'Comment[NOMINAL_SDEV]'
+    - ['library_preparation_protocol', 'nominal_sdev']
+# Protocols - special handling in code
+  - - 'Protocol REF'
+    - ['sequencing_protocol']
+  - - 'Assay Name'
+    - ['cell_suspension_0', 'biomaterial_core', 'biomaterial_id']
+  - - 'Comment[technical replicate group]'
+    - ['technical_replicate_group']
+  - - 'Technology Type'
+    - 'sequencing assay'
+  - - 'Scan Name'
+    - ['file_core', 'file_name']
+  - - 'Comment[RUN]'
+    - ['file_core', 'file_name']
+  - - 'Comment[FASTQ_URI]'
+    - ['file_core', 'file_name']
+
+# General section
+hca_api_url_root: 'https://dss.data.humancellatlas.org/v1'
+notfound: 'NOTFOUND'
+curate: 'CURATE'
+protocol_types : ['differentiation_protocol', 'dissociation_protocol', 'enrichment_protocol', 'library_preparation_protocol', 'sequencing_protocol']
+test_max_bundles: 1
+
+cv_translate:
+  'Characteristics[organism status]':
+      'no' : 'dead'
+      'default' : 'alive'
+  'Comment[end bias]':
+      'full length' : 'none'
+  'Comment[LIBRARY_STRAND]':
+      'unstranded' : 'not applicable'
+  'Comment[LIBRARY_LAYOUT]':
+      'true' : 'PAIRED'
+      'default' : 'SINGLE'
+  'Comment[primer]':
+      'poly-dT' : 'oligo-dT'
+      'random' : 'RANDOM'
+  'Comment[single cell isolation]':
+      'fluorescence-activated cell sorting' : 'FACS'
+  'Comment[spike in]':
+      'External RNA Controls Consortium (ERCC)' : 'ERCC'
+
+technology_mtab2hca :
+  'smart-seq2' : ['smart-seq2']
+  '10xV2' :  ["chromium 3' single cell v2", "10x v2 sequencing", "10x_v2"]
+
+sdrf_colkey_after_colvalues:
+   'Unit [time unit]' : ['Characteristics[age]']
+   'Unit[concentration unit]' : ['Characteristics[body mass index]']
