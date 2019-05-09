@@ -212,6 +212,31 @@ notfound: 'NOTFOUND'
 curate: 'CURATE'
 protocol_types : ['differentiation_protocol', 'dissociation_protocol', 'enrichment_protocol', 'library_preparation_protocol', 'sequencing_protocol']
 test_max_bundles: 1
+# Don't cache sequence file, process or links json files - as these typically change for every bundle, thus caching them would be a waste of memory
+hca_json_files_excluded_from_cache_regex: '^sequence\_file\_\d+$|^process\_\d+$|^links$'
+# Various HCA json schema fields used throughout the code:
+hca_sequence_file_regex: '^sequence\_file\_\d+$'
+hca_analysis_file_regex: 'analysis_file_\w+\.json$'
+hca_protocol_schema_regex: '\_protocol$'
+hca_project_json_file_name: "project_0"
+# The string fields 'geo_series', 'insdc_study' have been replaced with arrays: 'geo_series_accessions' and 'insdc_study_accessions' respectively
+# c.f. https://github.com/HumanCellAtlas/metadata-schema/blob/master/json_schema/type/project/project.json
+# but that migration is not reflected in https://github.com/HumanCellAtlas/metadata-schema/blob/master/json_schema/property_migrations.json - hence the explicit config below
+hca_old_secondary_accessions_labels: ['geo_series', 'insdc_study']
+hca_new_secondary_accessions_labels: ['geo_series_accessions', 'insdc_study_accessions']
+hca_schema_version_field_name: "describedBy"
+# The string field 'array_express_investigation' has been replaced with an array field: 'array_express_accessions'
+# c.f. https://github.com/HumanCellAtlas/metadata-schema/blob/master/json_schema/type/project/project.json
+# but that migration is not reflected in https://github.com/HumanCellAtlas/metadata-schema/blob/master/json_schema/property_migrations.json - hence the explicit config below
+hca_old_arrayexpress_label: "array_express_investigation"
+hca_new_arrayexpress_label: "array_express_accessions"
+hca_supplementary_links_label: "supplementary_links"
+hca_project_uuid_elasticsearch_path: "files.project_json.provenance.document_id"
+hca_project_json_path: ['metadata', 'files', 'project_json']
+hca_project_uuid_path: ['provenance', 'document_id']
+hca_project_title_path: ['project_core', 'project_title']
+hca_file_json_path: ['metadata', 'manifest', 'files']
+hca_file_json_name_path: ['name']
 
 cv_translate:
   'Characteristics[organism status]':

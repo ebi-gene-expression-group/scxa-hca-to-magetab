@@ -84,22 +84,23 @@ def get_magetab_equivalent(magetab_label, hca_value, config):
 # To access that value traverse hca_data_structure recursively using keys in list: hca_schema_path in turn.
 # If no value is found, check if the required HCA schema location was affected by a migration - according to property_migrations
 def get_hca_value(accession, magetab_label, hca_schema_path, hca_data_structure, project_bundle_uuids, logger, config, property_migrations, warn_of_missing_fields_in_hca_json):
-    value = get_hca_value_for_path(accession, magetab_label, hca_schema_path, hca_data_structure, project_bundle_uuids, logger, config, property_migrations, warn_of_missing_fields_in_hca_json)
+    value = get_hca_value_for_path(hca_schema_path, hca_data_structure, logger, config, warn_of_missing_fields_in_hca_json, accession, magetab_label, project_bundle_uuids)
     if value == get_val(config, 'notfound'):
         # Now check to see if key may be missing due to a HCA property migration
         # Example describedBy value: https://schema.humancellatlas.org/type/project/9.0.3/project
+        describedBy = get_val(config, 'hca_schema_version_field_name')
         if hca_schema_path[0] in hca_data_structure:
             # We need describedBy_version to be able to check if a schema migration applies; if hca_schema_path[0] cannot be found in hca_data_structure, we don't have describedBy_version.
             # In such cases, this bundle does not have data in schema: hca_schema_path[0]
-            describedBy_version = hca_data_structure[hca_schema_path[0]]['describedBy'].split('/')[-2]            
+            describedBy_version = hca_data_structure[hca_schema_path[0]][describedBy].split('/')[-2]
             migrated_schema_path = get_migrated_location(property_migrations, describedBy_version, hca_schema_path, logger)
             if migrated_schema_path:
-                value = get_hca_value_for_path(accession, magetab_label, migrated_schema_path, hca_data_structure, project_bundle_uuids, logger, config, property_migrations, warn_of_missing_fields_in_hca_json)
+                value = get_hca_value_for_path(migrated_schema_path, hca_data_structure, logger, config, warn_of_missing_fields_in_hca_json, accession, magetab_label, project_bundle_uuids)
     return value
 
 # Retrieve value that corresponds to magetab_label in hca_data_structure, populated from json files in study_uuid's bundle_uuid.
 # To access that value traverse hca_data_structure recursively using keys in list: hca_schema_path in turn.
-def get_hca_value_for_path(accession, magetab_label, hca_schema_path, hca_data_structure, project_bundle_uuids, logger, config, property_migrations, warn_of_missing_fields_in_hca_json):
+def get_hca_value_for_path(hca_schema_path, hca_data_structure, logger, config, warn_of_missing_fields_in_hca_json, accession = None, magetab_label = None, project_bundle_uuids = None):
     leaf = None
     for key in hca_schema_path:
         if key in list(hca_data_structure.keys()):
@@ -112,7 +113,11 @@ def get_hca_value_for_path(accession, magetab_label, hca_schema_path, hca_data_s
         else:
             leaf = get_val(config, 'notfound')
             if warn_of_missing_fields_in_hca_json:
-                logger.warning("Key: '%s' (in %s) is missing for accession: %s, magetab label: '%s' from HCA json for study: %s bundle (row): %s" % (key, hca_schema_path, accession, magetab_label, project_bundle_uuids[0], project_bundle_uuids[1]))
+                if accession and magetab_label and project_bundle_uuids:
+                    context_info = " for accession: %s, magetab label: '%s' from HCA json for study: %s bundle (row): %s" % (accession, magetab_label, project_bundle_uuids[0], project_bundle_uuids[1])
+                else:
+                    context_info=""
+                logger.warning("Key: '%s' (in %s) is missing%s" % (key, hca_schema_path, context_info))
             break
     return get_magetab_equivalent(magetab_label, leaf, config)
 
@@ -197,7 +202,7 @@ def get_api_url_for_next_page(headers):
     return url
 
 # Retrieve the list of unique project uuids, corresponding to all HCA projects of type: technology
-def get_project_uuid2accessions_for_technology(hca_api_url_root, logger, technology, ncbi_taxon_id):
+def get_project_uuid2accessions_for_technology(hca_api_url_root, logger, technology, ncbi_taxon_id, config):
     project_uuid2accession = {}
     smart_regex = re.compile('smart-.*$')
     tenxV2_regex = re.compile('10xV2')
@@ -242,24 +247,26 @@ def get_project_uuid2accessions_for_technology(hca_api_url_root, logger, technol
     url = '%s/%s' % (hca_api_url_root, 'search?output_format=raw&replica=aws&per_page=500')
     json = get_remote_json(url, logger, 'post', data)[0]
     for result in json['results']:
-        for project_json in result['metadata']['files']['project_json']:
-            project_uuid = project_json['provenance']['document_id']
-            project_title = project_json['project_core']['project_title']
+        for project_json in get_hca_value_for_path(get_val(config, 'hca_project_json_path'), result, logger, config, True):
+            project_uuid = get_hca_value_for_path(get_val(config, 'hca_project_uuid_path'), project_json, logger, config, True)
+            project_title = get_hca_value_for_path(get_val(config, 'hca_project_title_path'), project_json, logger, config, True)
             gxa_accessions = OrderedSet([])
             if re.search('Test *$', project_title):
                 # Skip test data sets
                 continue
-            # E-AAAA-00 appears to be the default value HCA use when then don't have a gxa accession
-            if 'array_express_investigation' in project_json.keys():
-                if project_json['array_express_investigation'] != 'E-AAAA-00':
-                    gxa_accessions.add(project_json['array_express_investigation'])
-            elif 'array_express_accessions' in  project_json.keys():
-                # The string fields 'array_express_investigation' will soon be replaced with an array field: 'array_express_accessions' - hence the loop below
-                # c.f. https://github.com/HumanCellAtlas/metadata-schema/blob/master/json_schema/type/project/project.json
-                for gxa_accession in project_json['array_express_accessions']:
+            # E-AAAA-00 appears to be the default value HCA uses when no ArrayExpress accession is available
+            hca_old_arrayexpress_label = get_val(config, 'hca_old_arrayexpress_label')
+            hca_new_arrayexpress_label = get_val(config, 'hca_new_arrayexpress_label')
+            if hca_old_arrayexpress_label in project_json.keys():
+                if project_json[hca_old_arrayexpress_label] != 'E-AAAA-00':
+                    gxa_accessions.add(project_json[hca_old_arrayexpress_label])
+            elif hca_new_arrayexpress_label in project_json.keys():
+                # For the reason for the loop below see a comment near hca_old_arrayexpress_label in hca2mtab.yml
+                for gxa_accession in project_json[hca_new_arrayexpress_label]:
                     gxa_accessions.add(gxa_accession)
-            if 'supplementary_links' in project_json.keys():
-                for url in project_json['supplementary_links']:
+            hca_supplementary_links_label = get_val(config, 'hca_supplementary_links_label')
+            if hca_supplementary_links_label in project_json.keys():
+                for url in project_json[hca_supplementary_links_label]:
                     m = re.search(r'^.*?\/(E-\w{4}-\d+).*$', url)
                     if m:
                         gxa_accessions.add(m.group(1))
@@ -277,7 +284,7 @@ def get_all_hca_project_uuids(hca_api_url_root, config, logger):
     for technology in get_val(config, 'technology_mtab2hca').keys():
         for ncbi_taxon_id in [9606, 10090]:
             # human and mouse
-            project_uuid2accession.update(get_project_uuid2accessions_for_technology(hca_api_url_root, logger, technology, ncbi_taxon_id))
+            project_uuid2accession.update(get_project_uuid2accessions_for_technology(hca_api_url_root, logger, technology, ncbi_taxon_id, config))
     return project_uuid2accession
 
 # Retrieve HCA project uuid from idf_file_path
@@ -328,7 +335,8 @@ def get_gxa_accession_for_project_uuid(gxa_dir, project_uuid2accession):
 # N.B. if mode == 'test', retrieve only the first page of results
 def get_bundle2metadata_files_for_project_uuid(project_uuid, hca_api_url_root, mode, logger, config):
     bundle2metadata_files = {}
-    data = { "es_query": { "query": { "match": { "files.project_json.provenance.document_id": project_uuid }}}}
+    hca_project_uuid_elasticsearch_path = get_val(config, 'hca_project_uuid_elasticsearch_path')
+    data = { "es_query": { "query": { "match": { hca_project_uuid_elasticsearch_path : project_uuid }}}}
     # Page size = 10 appears to be the maximum currently allowed
     url = '%s/%s' % (hca_api_url_root, 'search?output_format=raw&replica=aws&per_page=10')
     bundle_cnt = 0
@@ -347,9 +355,9 @@ def get_bundle2metadata_files_for_project_uuid(project_uuid, hca_api_url_root, m
                 logger.error(err_msg)
                 raise HCA2MagetabTranslationError(err_msg)
             analysis_bundle = False
-            for file_json in result['metadata']['manifest']['files']:
-                file_name = file_json['name']
-                if re.search(r'analysis_file_\w+\.json$', file_name):
+            for file_json in get_hca_value_for_path(get_val(config, 'hca_file_json_path'), result, logger, config, True):
+                file_name = get_hca_value_for_path(get_val(config, 'hca_file_json_name_path'), file_json, logger, config, True)
+                if re.search(r"" + get_val(config, 'hca_analysis_file_regex'), file_name):
                     analysis_bundle = True
                 elif re.search(r'\.json$', file_name):
                     metadata_files.append((file_json['uuid'], file_name))
@@ -448,29 +456,7 @@ def expand_protocol_columns(row, headers, protocol_type2num_protocols, logger):
         col_idx += 1
 
 # Email report on all experiments imported from HCA DCC        
-def email_report(imported_experiments_report, email_recipients):
-    msg = MIMEText(imported_experiments_report, "plain", "utf-8")
-    msg['Subject'] = "New experiments imported from HCA DCC"
-    msg['From'] = "fg_atlas@ebi.ac.uk"
-    msg['To'] = email_recipients
-
-    for attempt in range(MAXIMUM_NUMBER_OF_EMAIL_ATTEMPTS):
-        try:
-            # Send the message via the local smtp server
-            s = smtplib.SMTP('localhost')
-            s.sendmail(msg['From'], email_recipients, msg.as_string())
-            s.quit()
-            break
-        except EnvironmentError as exc:
-            if exc.errno == errno.ECONNREFUSED:
-                time.sleep(EMAIL_RETRY_INTERVAL)
-            else:
-                raise # re-raise otherwise
-    else: # we never broke out of the for loop
-        raise RuntimeError("Maximum number of unsuccessful attempts to email validation report reached for imported experiments report")
-
-# Email to email_recipients a report with subject and body provided as the first call arguments
-def email_report(subject, body, email_recipients):
+def email_report(body, subject, email_recipients):
     msg = MIMEText(body, "plain", "utf-8")
     msg['Subject'] = subject
     msg['From'] = "fg_atlas@ebi.ac.uk"
@@ -489,7 +475,29 @@ def email_report(subject, body, email_recipients):
             else:
                 raise # re-raise otherwise
     else: # we never broke out of the for loop
-        raise RuntimeError("Maximum number of unsuccessful attempts to email validation report reached for %s" % subject)
+        raise RuntimeError("Maximum number of unsuccessful attempts to email validation report reached for imported experiments report")
+
+# Retrieve into hca_json/hca_json_cache all the json files for bundle_uuid
+def retrieve_hca_json_for_bundle(accession, bundle2metadata_files, project_bundle_uuids, hca_json, hca_json_cache, hca_api_url_root, config, logger):
+    # Iterate over (file_uuid, file_name) tuples corresponding to bundle_uuid
+    for (file_uuid, file_name) in bundle2metadata_files[project_bundle_uuids[1]]:
+        file_type = file_name.split('.')[0]
+        # Retrieve the json for file_uuid from cache if it's there; otherwise retrieve it from HCA DCC and add to the cache
+        if file_uuid not in hca_json_cache.keys():
+            file_json_url = '%s/files/%s?replica=aws' % (hca_api_url_root, file_uuid)
+            logger.debug('Study uuid: %s ; bundle uuid: %s ; Accession: %s - About to retrieve file (of type: %s) : %s ' % (project_bundle_uuids[0], project_bundle_uuids[1], accession, file_type, file_json_url))
+            row_data = get_remote_json(file_json_url, logger)[0]
+            if not re.search(r"" + get_val(config, 'hca_json_files_excluded_from_cache_regex'), file_name):
+                hca_json_cache[file_uuid] = row_data
+            # Store retrieved json in hca_json[file_type]
+            hca_json[file_type] = row_data
+        else:
+            # json is in cache - retrieve from there
+            hca_json[file_type] = hca_json_cache[file_uuid]
+
+        logger.debug("%s : %s --> %s" % (accession, file_name, hca_json[file_type]))
+
+
         
 version = '0.1'
 # End of utils.py
