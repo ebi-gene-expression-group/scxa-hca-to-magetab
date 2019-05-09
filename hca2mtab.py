@@ -24,7 +24,7 @@ process_name = 'hca2mtab'
 # - 'dryrun' lists what project uuids would be retrieved and what gxa accessions they would be assigned to, and
 # - 'prod' is the norma production run
 # data_dir - directory in which the generated magetab files should be placed
-def convert_hca_json_to_magetab(mode, data_dir, email_from, email_recipients, new_only = True):
+def convert_hca_json_to_magetab(mode, data_dir, sender, email_recipients, new_only = True):
     # Retrieve the HCA Json to MAGETAB translation config
     config = utils.get_config(process_name)
     idf_config = utils.get_val(config, 'idf')
@@ -72,6 +72,11 @@ def convert_hca_json_to_magetab(mode, data_dir, email_from, email_recipients, ne
         # Initialise SDRF-related data structures and flags
         # Set of technologies found in bundles for a given project uuid. The presence of a technology name in that set acts as a flag that sdrf column headers have been collected for that technology.
         technologies_found = set([])
+
+        # We want to warn of missing fields for the first bundle (since each bundle will contain some technology), the test below
+        # effectively checks if we're dealing with the first bundle or not
+        warn_of_missing_fields = not technologies_found
+        
         # List of SDRF column headers (per technology) that will be output in each (technology-specific) sdrf file
         technology2sdrf_column_headers = {}
         # List value corresponding to each technology key in technology2rows dict will be used to accumulate rows of data to be output into the generated (technology-specific) SDRF file
@@ -100,7 +105,7 @@ def convert_hca_json_to_magetab(mode, data_dir, email_from, email_recipients, ne
             # Get all relevant HCA objcts for bundle_uuid into hca_json dict
             hca_json = {}
             # Retrieve into hca_json/hca_json_cache all the json files for bundle_uuid
-            utils.retrieve_hca_json_for_bundle(accession, bundle2metadata_files, project_bundle_uuids, hca_json, hca_json_cache, hca_api_url_root, config, logger)
+            utils.retrieve_hca_json_for_bundle(accession, bundle2metadata_files, project_bundle_uuids, hca_json, hca_json_cache, hca_api_url_root, config, logger, warn_of_missing_fields)
             bundle_cnt += 1
             if bundle_cnt % 50 == 0:
                 time_end = utils.unix_time_millis(datetime.now())
@@ -125,9 +130,6 @@ def convert_hca_json_to_magetab(mode, data_dir, email_from, email_recipients, ne
             ###### SDRF ######
             ##################
             technology = None
-            # We want to warn of missing fields for the first bundle (since each bundle will contain some technology), the test below
-            # effectively checks if we're dealing with the first bundle or not
-            warn_of_missing_fields = not technologies_found
             # Set of indexes of sdrf columns with non-empty sdrf columns for the current bundle_uuid
             indexes_of_non_empty_sdrf_columns = set([])
             # Output one SDRF row per each sequence file in the bundle
@@ -431,7 +433,7 @@ def convert_hca_json_to_magetab(mode, data_dir, email_from, email_recipients, ne
         duration = (time_end - time_start)/1000/60
         logger.info("Processing HCA study uuid: %s for gxa accession: %s took %d mins" % (project_uuid, accession, duration))
     if imported_experiments:
-        utils.email_report("New experiments imported from HCA DCC", '\n'.join(imported_experiments), email_recipients)
+        utils.email_report("New experiments imported from HCA DCC", '\n'.join(imported_experiments), sender, email_recipients)
 
 if __name__ == '__main__':
     # Capture call arguments
@@ -443,9 +445,9 @@ if __name__ == '__main__':
 
     mode = sys.argv[1]
     data_dir = sys.argv[2]
-    email_from = sys.argv[3]
+    sender = sys.argv[3]
     email_recipients = sys.argv[4]
     try:
-        convert_hca_json_to_magetab(mode, data_dir, email_from, email_recipients, True)
+        convert_hca_json_to_magetab(mode, data_dir, sender, email_recipients, True)
     except utils.HCA2MagetabTranslationError as exc:
-        utils.email_report("%s error" % process_name, "%s has crashed with the following error: %s" % (process_name, str(exc)), email_recipients)
+        utils.email_report("%s error" % process_name, "%s has crashed with the following error: %s" % (process_name, str(exc)), sender, email_recipients)

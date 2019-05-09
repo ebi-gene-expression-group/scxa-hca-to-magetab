@@ -238,6 +238,11 @@ hca_project_title_path: ['project_core', 'project_title']
 hca_file_json_path: ['metadata', 'manifest', 'files']
 hca_file_json_name_path: ['name']
 
+# The above config refers to json files of the following HCA schemas with _0 postfix explicitly, and thus follows an implicit assumption that 
+# for a single bundle only one json file exists per schema in the list below. This list is used by the code to test data retrieved from HCA and
+# report a warning (TODO: should be error) if that assumption is broken.
+hca_schemas_with_one_json_per_bundle_expected: ['cell_line', 'cell_suspension', 'donor_organism', 'project', 'specimen_from_organism']
+
 cv_translate:
   'Characteristics[organism status]':
       'no' : 'dead'

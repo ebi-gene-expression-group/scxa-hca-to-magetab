@@ -456,10 +456,10 @@ def expand_protocol_columns(row, headers, protocol_type2num_protocols, logger):
         col_idx += 1
 
 # Email report on all experiments imported from HCA DCC        
-def email_report(body, subject, from, email_recipients):
+def email_report(subject, body, sender, email_recipients):
     msg = MIMEText(body, "plain", "utf-8")
     msg['Subject'] = subject
-    msg['From'] = from
+    msg['From'] = sender
     msg['To'] = email_recipients
 
     for attempt in range(MAXIMUM_NUMBER_OF_EMAIL_ATTEMPTS):
@@ -478,14 +478,16 @@ def email_report(body, subject, from, email_recipients):
         raise RuntimeError("Maximum number of unsuccessful attempts to email validation report reached for imported experiments report")
 
 # Retrieve into hca_json/hca_json_cache all the json files for bundle_uuid
-def retrieve_hca_json_for_bundle(accession, bundle2metadata_files, project_bundle_uuids, hca_json, hca_json_cache, hca_api_url_root, config, logger):
+def retrieve_hca_json_for_bundle(accession, bundle2metadata_files, project_bundle_uuids, hca_json, hca_json_cache, hca_api_url_root, config, logger, warn_of_missing_fields):
     # Iterate over (file_uuid, file_name) tuples corresponding to bundle_uuid
     for (file_uuid, file_name) in bundle2metadata_files[project_bundle_uuids[1]]:
         file_type = file_name.split('.')[0]
+        if warn_of_missing_fields and violates_hca_schema_assumptions(file_type, config):
+            logger.warning("File type: %s for project uuid: %s ; bundle uuid: %s ; accession: %s violates the assumption that only _0.json file for that type should exist in a bundle" % (file_type, project_bundle_uuids[0], project_bundle_uuids[1], accession))
         # Retrieve the json for file_uuid from cache if it's there; otherwise retrieve it from HCA DCC and add to the cache
         if file_uuid not in hca_json_cache.keys():
             file_json_url = '%s/files/%s?replica=aws' % (hca_api_url_root, file_uuid)
-            logger.debug('Study uuid: %s ; bundle uuid: %s ; Accession: %s - About to retrieve file (of type: %s) : %s ' % (project_bundle_uuids[0], project_bundle_uuids[1], accession, file_type, file_json_url))
+            logger.debug('project uuid: %s ; bundle uuid: %s ; Accession: %s - About to retrieve file (of type: %s) : %s ' % (project_bundle_uuids[0], project_bundle_uuids[1], accession, file_type, file_json_url))
             row_data = get_remote_json(file_json_url, logger)[0]
             if not re.search(r"" + get_val(config, 'hca_json_files_excluded_from_cache_regex'), file_name):
                 hca_json_cache[file_uuid] = row_data
@@ -497,7 +499,15 @@ def retrieve_hca_json_for_bundle(accession, bundle2metadata_files, project_bundl
 
         logger.debug("%s : %s --> %s" % (accession, file_name, hca_json[file_type]))
 
-
+# Return True if file_type violates our assumption that there should exist only one (_0.json) file for tha type in a HCA bundle
+def violates_hca_schema_assumptions(file_type, config):
+    schema_type = re.sub(r"\_\d+$", "", file_type)
+    if schema_type in get_val(config, 'hca_schemas_with_one_json_per_bundle_expected'):
+        m = re.search(r'\d+$', file_type)
+        if m != None:
+            suffix = int(m.group(0))
+            return suffix > 0
+    return False
         
 version = '0.1'
 # End of utils.py
