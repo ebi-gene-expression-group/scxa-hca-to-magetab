@@ -456,10 +456,10 @@ def expand_protocol_columns(row, headers, protocol_type2num_protocols, logger):
         col_idx += 1
 
 # Email report on all experiments imported from HCA DCC        
-def email_report(body, subject, email_recipients):
+def email_report(body, subject, from, email_recipients):
     msg = MIMEText(body, "plain", "utf-8")
     msg['Subject'] = subject
-    msg['From'] = "fg_atlas@ebi.ac.uk"
+    msg['From'] = from
     msg['To'] = email_recipients
 
     for attempt in range(MAXIMUM_NUMBER_OF_EMAIL_ATTEMPTS):

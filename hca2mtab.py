@@ -24,7 +24,7 @@ process_name = 'hca2mtab'
 # - 'dryrun' lists what project uuids would be retrieved and what gxa accessions they would be assigned to, and
 # - 'prod' is the norma production run
 # data_dir - directory in which the generated magetab files should be placed
-def convert_hca_json_to_magetab(mode, data_dir, email_recipients, new_only = True):
+def convert_hca_json_to_magetab(mode, data_dir, email_from, email_recipients, new_only = True):
     # Retrieve the HCA Json to MAGETAB translation config
     config = utils.get_config(process_name)
     idf_config = utils.get_val(config, 'idf')
@@ -443,8 +443,9 @@ if __name__ == '__main__':
 
     mode = sys.argv[1]
     data_dir = sys.argv[2]
-    email_recipients = sys.argv[3]
+    email_from = sys.argv[3]
+    email_recipients = sys.argv[4]
     try:
-        convert_hca_json_to_magetab(mode, data_dir, email_recipients, True)
+        convert_hca_json_to_magetab(mode, data_dir, email_from, email_recipients, True)
     except utils.HCA2MagetabTranslationError as exc:
         utils.email_report("%s error" % process_name, "%s has crashed with the following error: %s" % (process_name, str(exc)), email_recipients)
