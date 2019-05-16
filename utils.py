@@ -53,8 +53,8 @@ def get_val(config, key):
     return config[key]
 
 # Create a logger writing to file file_path
-def create_logger(process_name, mode):
-    file_path = os.path.join(get_data_dir(process_name), 'logs', process_name + '.' + mode + '.' + datetime.now().strftime('%Y-%m-%d') + '.log')
+def create_logger(data_dir, mode):
+    file_path = os.path.join(data_dir, 'logs', process_name + '.' + mode + '.' + datetime.now().strftime('%Y-%m-%d') + '.log')
     # Need to give getLogger file_path (name) argument - so that it creates a unique logger for a given file_path
     logger = logging.getLogger(file_path)
     logger.setLevel(logging.INFO)
