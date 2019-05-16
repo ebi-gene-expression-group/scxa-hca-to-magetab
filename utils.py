@@ -39,10 +39,6 @@ def unix_time_millis(dt):
     epoch = datetime.utcfromtimestamp(0)
     return int((dt - epoch).total_seconds() * 1000)
 
-# Return data directory
-def get_data_dir(process_name):
-    return os.path.join(os.environ['ATLAS_PROD'], 'singlecell', 'experiment', process_name)
-
 # Returns dict containing process_name's config in the same environment as this script
 def get_config(process_name):
     with open(os.path.join(process_name + ".yml"), 'r') as stream:
@@ -53,7 +49,7 @@ def get_val(config, key):
     return config[key]
 
 # Create a logger writing to file file_path
-def create_logger(data_dir, mode):
+def create_logger(data_dir, process_name, mode):
     file_path = os.path.join(data_dir, 'logs', process_name + '.' + mode + '.' + datetime.now().strftime('%Y-%m-%d') + '.log')
     # Need to give getLogger file_path (name) argument - so that it creates a unique logger for a given file_path
     logger = logging.getLogger(file_path)
