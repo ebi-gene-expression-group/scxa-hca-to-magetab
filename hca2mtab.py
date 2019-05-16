@@ -30,7 +30,7 @@ def convert_hca_json_to_magetab(mode, data_dir, sender, email_recipients, new_on
     idf_config = utils.get_val(config, 'idf')
     sdrf_config = utils.get_val(config, 'sdrf')
 
-    logger = utils.create_logger(os.path.join(process_name), mode)
+    logger = utils.create_logger(data_dir, process_name, mode)
     hca_api_url_root = utils.get_val(config, 'hca_api_url_root')
 
     # uuid2accession dict forms the worklist of experiments to be imported from HCA
