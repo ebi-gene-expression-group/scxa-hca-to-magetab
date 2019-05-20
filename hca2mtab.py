@@ -10,10 +10,11 @@ import unicodecsv as csv
 from datetime import datetime
 from collections import OrderedDict
 from orderedset import OrderedSet
-# Local module
-import utils
 # For checking existence of magetab files
 import glob
+# Local modules
+import utils
+import hcadam
 
 process_name = 'hca2mtab'
 
@@ -32,28 +33,34 @@ def convert_hca_json_to_magetab(mode, data_dir, sender, email_recipients, new_on
 
     logger = utils.create_logger(data_dir, process_name, mode)
     hca_api_url_root = utils.get_val(config, 'hca_api_url_root')
+    # already_imported_project_uuids will be excluded from the import (and their json will not be cached)
+    if new_only:
+        already_imported_project_uuids = utils.get_previously_imported_projects(data_dir)
+    else:
+        already_imported_project_uuids = []
 
-    # uuid2accession dict forms the worklist of experiments to be imported from HCA
-    uuid2accession = utils.get_gxa_accession_for_project_uuid(data_dir, utils.get_all_hca_project_uuids(hca_api_url_root, config, logger))
+    project_uuids = hcadam.get_hca_project_uuid_to_import(hca_api_url_root, config, mode, already_imported_project_uuids, logger)
+
+    # project_uuid2gxa_accession dict forms the worklist of experiments to be imported from HCA
+    project_uuid2gxa_accession = {}
+    for project_uuid in project_uuids:
+        project_uuid2gxa_accession[project_uuid] = hcadam.get_gxa_accession_for_project_uuid(project_uuid, config)
+    project_uuid2gxa_accession = utils.resolve_gxa_accession_for_project_uuid(data_dir, project_uuid2gxa_accession)
 
     # Experiments imported from HCA DCC - for email report
     imported_experiments = []
-
-    # property_migrations.json file contains details of HCA schema migrations to date. We use this file to check if a field we found to be missing 
-    # may have moved somewhere else within HCA schema. If so, the code retrieves it from the new location instead.
-    property_migrations = utils.get_remote_json('https://raw.githubusercontent.com/HumanCellAtlas/metadata-schema/master/json_schema/property_migrations.json', logger)[0]
     
     # Log experiments to be imported
     logger.info("About to import from HCA DCC the following experiments:")
-    for project_uuid in uuid2accession.keys():
-        logger.info("%s -> %s" % (project_uuid, uuid2accession[project_uuid]))
+    for project_uuid in project_uuid2gxa_accession.keys():
+        logger.info("%s -> %s" % (project_uuid, project_uuid2gxa_accession[project_uuid]))
     if mode == 'dryrun':
         sys.exit(0)
 
     # Metadata retrieve starts here
-    for project_uuid in uuid2accession.keys():
+    for project_uuid in project_uuid2gxa_accession.keys():
         time_start = utils.unix_time_millis(datetime.now())
-        accession = uuid2accession.get(project_uuid)
+        accession = project_uuid2gxa_accession.get(project_uuid)
         if new_only:
             # N.B. if new_only is True, HCA projects for which an idf file in data_dir doesn't exist will be imported
             idf_file_path = '%s/%s.idf.txt*' % (data_dir, accession)
@@ -62,20 +69,13 @@ def convert_hca_json_to_magetab(mode, data_dir, sender, email_recipients, new_on
                 continue
         else:
             logger.info('About to translate json for HCA study uuid: %s to magetab for gxa accession: %s' % (project_uuid, accession) )
-        bundle2metadata_files = utils.get_bundle2metadata_files_for_project_uuid(project_uuid, hca_api_url_root, mode, logger, config)
-        logger.info('Retrieved %d bundles for study uuid: %s and accession: %s' % (len(bundle2metadata_files.keys()), project_uuid, accession))
 
-        # For a given experiment, the same json file (with the same unique uuid) is repeated in many bundles -
-        # we need to retrieve each such json file once only - hence the use of an in-memory cache
-        hca_json_cache = {}
+        # Retrieve all HCA json content for project_uuid
+        hca_json_for_project_uuid = hcadam.get_json_for_project_uuid(project_uuid)
 
         # Initialise SDRF-related data structures and flags
         # Set of technologies found in bundles for a given project uuid. The presence of a technology name in that set acts as a flag that sdrf column headers have been collected for that technology.
         technologies_found = set([])
-
-        # We want to warn of missing fields for the first bundle (since each bundle will contain some technology), the test below
-        # effectively checks if we're dealing with the first bundle or not
-        warn_of_missing_fields = not technologies_found
         
         # List of SDRF column headers (per technology) that will be output in each (technology-specific) sdrf file
         technology2sdrf_column_headers = {}
@@ -99,32 +99,26 @@ def convert_hca_json_to_magetab(mode, data_dir, sender, email_recipients, new_on
 
         # Auxiliary counter - used to limit number of HCA bundles processed during testing
         bundle_cnt = 0
-        for bundle_uuid in bundle2metadata_files.keys():
-            logger.debug("accession: %s bundle: %s (row: %d)" % (accession, bundle_uuid, bundle_cnt))
-            project_bundle_uuids = (project_uuid, bundle_uuid)
-            # Get all relevant HCA objcts for bundle_uuid into hca_json dict
-            hca_json = {}
-            # Retrieve into hca_json/hca_json_cache all the json files for bundle_uuid
-            utils.retrieve_hca_json_for_bundle(accession, bundle2metadata_files, project_bundle_uuids, hca_json, hca_json_cache, hca_api_url_root, config, logger, warn_of_missing_fields)
-            bundle_cnt += 1
-            if bundle_cnt % 50 == 0:
-                time_end = utils.unix_time_millis(datetime.now())
-                duration = (time_end - time_start) / 1000 / 60
-                print ("%s: bundles processed (took: %d mins) so far: %d" % (accession, duration, bundle_cnt), flush = True)
-
+        for bundle_url in hca_json_for_project_uuid.keys():
+            # We want to warn of missing fields for the first bundle (since each bundle will contain some technology), the test below
+            # effectively checks if we're dealing with the first bundle or not
+            warn_of_missing_fields = not technologies_found
+            hca_json_for_bundle = hca_json_for_project_uuid[bundle_url]
+            context = (accession, project_uuid, bundle_url)
             ####################################################
             #### Collect protocols for IDF from bundle_uuid ####
             ####################################################
             protocol_type2protocols_in_bundle = OrderedDict([])
             for protocol_key in utils.get_val(config, 'protocol_types'):
                 protocol_type2protocols_in_bundle[protocol_key] = OrderedSet([])
-                for file_key in list(hca_json.keys()):
-                    if re.search(r"" + protocol_key, file_key):    
-                        protocol_name = utils.get_hca_value(accession, 'Protocol Name', [file_key, 'protocol_core', 'protocol_id'], hca_json, project_bundle_uuids, logger, config, property_migrations, False)
-                        if protocol_name != utils.get_val(config, 'notfound'):
-                            protocol_description = utils.get_hca_value(accession, 'Protocol Description', [file_key, 'protocol_core', 'protocol_description'], hca_json, project_bundle_uuids, logger, config, property_migrations, False)
-                            protocol_type = utils.get_hca_value(accession, 'Protocol Type', [file_key, 'protocol_core', 'protocol_name'], hca_json, project_bundle_uuids, logger, config, property_migrations, False)
-                            protocol_type2protocols_in_bundle[protocol_key].add((protocol_name, protocol_description, protocol_type))
+                for schema_type in list(hca_json_for_bundle.keys()):
+                    if re.search(r"" + protocol_key, schema_type):
+                        for protocol_json in hca_json_for_bundle[schema_type]:
+                            protocol_name = utils.get_hca_value(utils.get_val(config, 'hca_protocol_name_path'), protocol_json, logger, config, False, 'Protocol Name', context)
+                            if protocol_name != utils.get_val(config, 'notfound'):
+                                protocol_description = utils.get_hca_value(utils.get_val(config, 'hca_protocol_description_path'), protocol_json, logger, config, False, 'Protocol Description', context)
+                                protocol_type = utils.get_hca_value(utils.get_val(config, 'hca_protocol_type_path'), protocol_json, logger, config, False, 'Protocol Type', context)
+                                protocol_type2protocols_in_bundle[protocol_key].add((protocol_name, protocol_description, protocol_type))
 
             ##################
             ###### SDRF ######
@@ -133,7 +127,7 @@ def convert_hca_json_to_magetab(mode, data_dir, sender, email_recipients, new_on
             # Set of indexes of sdrf columns with non-empty sdrf columns for the current bundle_uuid
             indexes_of_non_empty_sdrf_columns = set([])
             # Output one SDRF row per each sequence file in the bundle
-            for datafile_key in [x for x in hca_json.keys() if re.search(r"" + utils.get_val(config, 'hca_sequence_file_regex'), x)]:
+            for datafile_json in hca_json_for_bundle[utils.get_val(config, 'hca_sequence_file')]:
                 sdrf_column_headers = []
                 
                 current_row = []
@@ -148,11 +142,12 @@ def convert_hca_json_to_magetab(mode, data_dir, sender, email_recipients, new_on
                             # Special handling/parsing - geographical location - multiple json files need checking for field presence
                             value = utils.get_val(config, 'notfound')
                             regex = hca_path[0]
-                            for key in list(hca_json.keys()):
-                                if re.search(r"" + regex, key):
-                                    value = utils.get_hca_value(accession, magetab_label, [key] + hca_path[1:], hca_json, project_bundle_uuids, logger, config, property_migrations, warn_of_missing_fields)
-                                    if value != utils.get_val(config, 'notfound'):
-                                        break
+                            for schema_type in list(hca_json_for_bundle.keys()):
+                                if re.search(r"" + regex, schema_type):
+                                    for json_dict in hca_json_for_bundle[schema_type]:
+                                        value = utils.get_hca_value(hca_path[1:], json_dict, logger, config, warn_of_missing_fields, magetab_label, context)
+                                        if value != utils.get_val(config, 'notfound'):
+                                            break
                             utils.add_to_row(indexes_of_non_empty_sdrf_columns, sdrf_column_headers, magetab_label, value, current_row, characteristic_values, config)
                         elif magetab_label == 'Protocol REF':
                             protocol_type = hca_path[0]
@@ -166,11 +161,11 @@ def convert_hca_json_to_magetab(mode, data_dir, sender, email_recipients, new_on
                             utils.add_to_row(indexes_of_non_empty_sdrf_columns, sdrf_column_headers, magetab_label, protocol_ids, current_row, characteristic_values, config)
                         elif len(hca_path) > 0 and re.search(r"" + utils.get_val(config, 'hca_protocol_schema_regex'), hca_path[0]):
                             protocol_type = hca_path[0]
-                            # Special handling/parsing - for a given protocol_type, various protocol-related information needs to be collected from potentially multiple json files
+                            # Special handling/parsing - for a given protocol_type, various protocol-related information needs to be collected from potentially multiple HCA json files
                             values = set([])
-                            for key in list(hca_json.keys()):
-                                if re.search(r"" + protocol_type, key):
-                                    value = utils.get_hca_value(accession, magetab_label, [key] + hca_path[1:], hca_json, project_bundle_uuids, logger, config, property_migrations, warn_of_missing_fields)
+                            for schema_type in [x for x in hca_json_for_bundle.keys() if x == protocol_type]:
+                                for json_dict in hca_json_for_bundle[schema_type]:
+                                    value = utils.get_hca_value(hca_path[1:], json_dict, logger, config, warn_of_missing_fields, magetab_label, context)
                                     if value != utils.get_val(config, 'notfound'):
                                         if magetab_label == 'Comment[library construction]':
                                             # Capture technology for the current bundle
@@ -179,11 +174,11 @@ def convert_hca_json_to_magetab(mode, data_dir, sender, email_recipients, new_on
                                             value = technology
                                         values.add(str(value))
                             utils.add_to_row(indexes_of_non_empty_sdrf_columns, sdrf_column_headers, magetab_label, ', '.join(values), current_row, characteristic_values, config)
-                        elif magetab_label == 'Comment[HCA bundle uuid]':
-                            utils.add_to_row(indexes_of_non_empty_sdrf_columns, sdrf_column_headers, magetab_label, bundle_uuid, current_row, characteristic_values, config)
+                        elif magetab_label == 'Comment[HCA bundle url]':
+                            utils.add_to_row(indexes_of_non_empty_sdrf_columns, sdrf_column_headers, magetab_label, bundle_url, current_row, characteristic_values, config)
                         elif magetab_label in ['Comment[RUN]', 'Comment[FASTQ_URI]', 'Scan Name', 'Comment[technical replicate group]', 'Comment[HCA file uuid]']:
                             # Special handling/parsing - Comment[RUN] - datafile_key json file need checking for field presence
-                            value = utils.get_hca_value(accession, magetab_label, [datafile_key] + hca_path, hca_json, project_bundle_uuids, logger, config, property_migrations, warn_of_missing_fields)
+                            value = utils.get_hca_value(hca_path, datafile_json, logger, config, warn_of_missing_fields, magetab_label, context)
                             if magetab_label == 'Comment[RUN]':
                                 # NB. We're stripping e.g. _2.fastq.gz from the end - to retain just the core file name
                                 # Tested on the following types of file names:
@@ -191,11 +186,17 @@ def convert_hca_json_to_magetab(mode, data_dir, sender, email_recipients, new_on
                                 value = re.sub(r"(\_\w\d|\_\w\d\_\d+|\_\d)*\.f\w+\.gz", "", value)
                             utils.add_to_row(indexes_of_non_empty_sdrf_columns, sdrf_column_headers, magetab_label, value, current_row, characteristic_values, config)
                         else:
-                            # The recursive path to the corresponding field in a HCA json file is stored in list: hca_path
-                            value = utils.get_hca_value(accession, magetab_label, hca_path, hca_json, project_bundle_uuids, logger, config, property_migrations, warn_of_missing_fields)
+                            schema_type = hca_path[0]
+                            if schema_type in hca_json_for_bundle:
+                                # Retrieving the first element below follows the assumption of one single json object in schema_type in a bundle
+                                # (all the special cases were handled above)
+                                json_dict = hca_json_for_bundle[schema_type][0]
+                                value = utils.get_hca_value(hca_path[1:], json_dict, logger, config, warn_of_missing_fields, magetab_label, context)
+                            else:
+                                value = utils.get_val(config, 'notfound')
                             if magetab_label in \
-                                    ['Characteristics[organism]', 'Characteristics[disease]', 'Characteristics[cell subtype]', 'Characteristics[ethnic group]','Characteristics[strain]'] \
-                                    and value != utils.get_val(config, 'notfound'):
+                                ['Characteristics[organism]', 'Characteristics[disease]', 'Characteristics[cell subtype]', 'Characteristics[ethnic group]','Characteristics[strain]'] \
+                                and value != utils.get_val(config, 'notfound'):
                                 # Special handling/parsing - organism, disease - could be multiple according to HCA schema
                                 utils.add_to_row(indexes_of_non_empty_sdrf_columns, sdrf_column_headers, magetab_label, ','.join([x['text'] for x in value]), current_row, characteristic_values, config)
                             else:
@@ -233,7 +234,7 @@ def convert_hca_json_to_magetab(mode, data_dir, sender, email_recipients, new_on
                             # Merge set: protocol_type2protocols_in_bundle[protocol_type] into set already in technology2protocol_type2protocols[technology][protocol_type]  
                             technology2protocol_type2protocols[technology][protocol_type] |= protocol_type2protocols_in_bundle[protocol_type]
                 else:
-                    err_msg = "Failed to retrieve valid technology from value: \"%s\" in bundle: %s" % (hca_technology, bundle_uuid)
+                    err_msg = "Failed to retrieve valid technology from value: \"%s\" in bundle: %s" % (hca_technology, bundle_url)
                     logger.error(err_msg)
                     raise utils.HCA2MagetabTranslationError(err_msg)
 
@@ -311,13 +312,17 @@ def convert_hca_json_to_magetab(mode, data_dir, sender, email_recipients, new_on
                 csvwriter = csv.writer(f, delimiter = '\t', encoding='utf-8', escapechar='\\', quotechar='', lineterminator='\n', quoting=csv.QUOTE_NONE)
                 for line_item in idf_config:
                     magetab_label = line_item[0]
-                    hca_path = line_item[1]                    
+                    hca_path = line_item[1]
                     if isinstance(hca_path, list):
                         if magetab_label in ['Term Source Name','Term Source File']:
                             # Special handling/parsing - hca_path is a list of literal values, rather than locations in HCA json files
                             csvwriter.writerow([magetab_label] + hca_path)
                             continue
-                        value = utils.get_hca_value(accession, magetab_label, hca_path, hca_json, project_bundle_uuids, logger, config, property_migrations, warn_of_missing_fields)
+                        if hca_path:
+                            # Note the assumption that only one project_json object exists per bundle
+                            # (c.f. hca_schemas_with_one_json_per_bundle_expected in hca2mtab.yml)
+                            json_dict = hca_json_for_bundle[hca_path[0]][0]
+                        value = utils.get_hca_value(hca_path[1:], json_dict, logger, config, True, magetab_label, context)
                         if magetab_label in ['Public Release Date'] and value != utils.get_val(config, 'notfound'):
                             # Special handling/parsing - Public Release date, Comment[HCALastUpdateDate], Comment[HCAReleaseDate]
                             m = re.search(r'^(\d{4}\-\d{2}\-\d{2}).*$', value)
@@ -342,19 +347,18 @@ def convert_hca_json_to_magetab(mode, data_dir, sender, email_recipients, new_on
                             # Special handling - secondary accessions
                             secondary_accessions = OrderedSet([])
                             for label in utils.get_val(config, 'hca_old_secondary_accessions_labels'):
-                                hca_project_json = hca_json[utils.get_val(config, 'hca_project_json_file_name')]
-                                if label in list(hca_project_json.keys()):
+                                hca_project_json = hca_json_for_bundle[utils.get_val(config, 'hca_project')]
+                                if label in hca_project_json:
                                     secondary_accessions.add(hca_project_json[label])
                             # For the reason for the loop below see a comment near hca_old_secondary_accessions_labels in hca2mtab.yml
                             for label in utils.get_val(config, 'hca_new_secondary_accessions_labels'):
-                                if label in list(hca_project_json.keys()):
+                                if label in hca_project_json:
                                     for secondary_accession in hca_project_json[label]:
                                         secondary_accessions.add(secondary_accession)
                             # Now append the HCA study uuid
                             secondary_accessions.add(project_uuid)
                             if len(secondary_accessions) > 0:
                                 csvwriter.writerow(['Comment[SecondaryAccession]'] + list(secondary_accessions))
-
                         elif magetab_label in ['Experimental Factor Name','Experimental Factor Type']:
                             # Special handling - populate factors that where auto-generated in SDRF above
                             idf_line = [magetab_label]
@@ -373,22 +377,22 @@ def convert_hca_json_to_magetab(mode, data_dir, sender, email_recipients, new_on
                                 contact_rows = OrderedDict()
                                 for row_label in magetab_label:
                                     contact_rows[row_label] = []
-                                for contact in utils.get_hca_value(accession, magetab_label, hca_path, hca_json, project_bundle_uuids, logger, config, property_migrations, True):
+                                for contact in utils.get_hca_value(hca_path[1:], json_dict, logger, config, True, magetab_label, context):
                                     contact_name_arr = contact['contact_name'].split(',')
                                     contact_rows['Person Last Name'].append(contact_name_arr[0])
                                     contact_rows['Person First Name'].append(contact_name_arr[-1].lstrip())
                                     if len(contact_name_arr) == 3:
                                         contact_rows['Person Mid Initials'].append(contact_name_arr[1])
-                                for contact in utils.get_hca_value(accession, magetab_label, hca_path, hca_json, project_bundle_uuids, logger, config, property_migrations, True):
-                                    email = utils.get_hca_value(accession, magetab_label, ['email'], contact, project_bundle_uuids, logger, config, property_migrations, True)
+                                for contact in utils.get_hca_value(hca_path[1:], json_dict, logger, config, True, magetab_label, context):
+                                    email = utils.get_hca_value(['email'], contact, logger, config, True, magetab_label, context)
                                     contact_rows['Person Email'].append(email if email != utils.get_val(config, 'notfound') else '')
                                     contact_rows['Person Affiliation'].append(contact['institution'])
-                                for contact in utils.get_hca_value(accession, magetab_label, hca_path, hca_json, project_bundle_uuids, logger, config, property_migrations, True):
-                                    address = utils.get_hca_value(accession, magetab_label, ['address'], contact, project_bundle_uuids, logger, config, property_migrations, True)
+                                for contact in utils.get_hca_value(hca_path[1:], json_dict, logger, config, True, magetab_label, context):
+                                    address = utils.get_hca_value(['address'], contact, logger, config, True, magetab_label, context)
                                     contact_rows['Person Address'].append(address if address != utils.get_val(config, 'notfound') else '')
                                 for key in list(contact_rows.keys()):
                                     csvwriter.writerow([key] + contact_rows[key])
-                            elif re.search('Protocol Name', magetab_label[0]):
+                            elif 'Protocol Name' == magetab_label[0]:
                                 # Special handling/parsing - Protocols
                                 protocol_rows = OrderedDict()
                                 for row_label in magetab_label:
@@ -402,21 +406,21 @@ def convert_hca_json_to_magetab(mode, data_dir, sender, email_recipients, new_on
                                 for key in list(protocol_rows.keys()):
                                     csvwriter.writerow([key] + protocol_rows[key])
                             elif re.search('Publication Title', magetab_label[0]):
-                                if utils.get_hca_value(accession, magetab_label[0], hca_path, hca_json, project_bundle_uuids, logger, config, property_migrations, True) == utils.get_val(config, 'notfound'):
+                                if utils.get_hca_value(hca_path[1:], json_dict, logger, config, True, magetab_label[0], context) == utils.get_val(config, 'notfound'):
                                     # Skip the publications-related idf config
                                     continue
                                 # Special handling/parsing - Publications
                                 publication_rows = OrderedDict()
                                 for row_label in 'Publication Title', 'Publication Author List', 'PubMed ID', 'Publication DOI':
                                     publication_rows[row_label] = []
-                                for publication in utils.get_hca_value(accession, magetab_label, hca_path, hca_json, project_bundle_uuids, logger, config, property_migrations, True):
+                                for publication in utils.get_hca_value(hca_path[1:], json_dict, logger, config, True, magetab_label, context):
                                     publication_rows['Publication Title'].append(
-                                        utils.get_hca_value(accession, magetab_label, ['publication_title'], publication, project_bundle_uuids, logger, config, property_migrations, True))
+                                        utils.get_hca_value(utils.get_val(config, 'hca_publication_title_path'), publication, logger, config, True, magetab_label, context))
                                     publication_rows['Publication Author List'].append(
-                                        ', '.join(utils.get_hca_value(accession, magetab_label, ['authors'], publication, project_bundle_uuids, logger, config, property_migrations, True)))
-                                    pubmed_id = utils.get_hca_value(accession, magetab_label, ['pmid'], publication, project_bundle_uuids, logger, config, property_migrations, True)
+                                        ', '.join(utils.get_hca_value(utils.get_val(config, 'hca_publication_authors_path'), publication, logger, config, True, magetab_label, context)))
+                                    pubmed_id = utils.get_hca_value(utils.get_val(config, 'hca_publication_pmid_path'), publication, logger, config, True, magetab_label, context)
                                     publication_rows['PubMed ID'].append(str(pubmed_id) if str(pubmed_id) != utils.get_val(config, 'notfound') else '')
-                                    publication_doi = utils.get_hca_value(accession, magetab_label, ['doi'], publication, project_bundle_uuids, logger, config, property_migrations, True)
+                                    publication_doi = utils.get_hca_value(utils.get_val(config, 'hca_publication_doi_path'), publication, logger, config, True, magetab_label, context)
                                     publication_rows['Publication DOI'].append(publication_doi if publication_doi != utils.get_val(config, 'notfound') else '')
                                         
                                 for key in list(publication_rows.keys()):
@@ -425,7 +429,7 @@ def convert_hca_json_to_magetab(mode, data_dir, sender, email_recipients, new_on
                             # magetab_label is not a list or a special case
                             csvwriter.writerow([magetab_label, value])
                             if magetab_label == 'Investigation Title':
-                                imported_experiments.append("%s (%s - %d bundles): %s" % (accession, technology, len(bundle2metadata_files.keys()), value))
+                                imported_experiments.append("%s (%s - %d bundles): %s" % (accession, technology, len(hca_json_for_project_uuid.keys()), value))
                     else:
                         # hca_path is not a list
                         csvwriter.writerow(line_item)
@@ -439,7 +443,7 @@ if __name__ == '__main__':
     # Capture call arguments
     if len(sys.argv) < 3:
         print('Call arguments needed, e.g. : ')
-        print (sys.argv)
+        print(sys.argv)
         print(sys.argv[0] + ' prod /magetab/output/path smith@ebi.ac.uk,jones@ebi.ac.uk')
         sys.exit(1)
 
