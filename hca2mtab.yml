@@ -5,21 +5,21 @@ idf:
   - - 'MAGE-TAB Version'
     - '1.1'
   - - 'Investigation Title'
-    - ['project_0', 'project_core', 'project_title']
+    - ['project', 'project_core', 'project_title']
   - - 'Comment[Submitted Name]'
-    - ['project_0', 'project_core', 'project_short_name']
+    - ['project', 'project_core', 'project_short_name']
   - - 'Experiment Description'
-    - ['project_0', 'project_core', 'project_description']
+    - ['project', 'project_core', 'project_description']
 # Public Release date - special parsing in code
   - - 'Public Release Date'
-    - ['project_0', 'provenance', 'submission_date']
+    - ['project', 'provenance', 'submission_date']
 # Contributors - special parsing in code
   - - ['Person Last Name', 'Person First Name', 'Person Mid Initials', 'Person Email', 'Person Affiliation', 'Person Address']
-    - ['project_0', 'contributors']
+    - ['project', 'contributors']
 # As HCA doesn't identify submitters, the first contributor will be identified as a submitter be default
   - - 'Person Roles'
     - 'submitter'
-# Protocols - special handling in code
+# Protocols - special handling in code - c.f. hca_protocol_*_path fields below
   - - ['Protocol Name', 'Protocol Description', 'Protocol Type']
     - []
 # References - special handling in code (spaces converted to tabs)
@@ -29,7 +29,7 @@ idf:
     - ['http://www.ebi.ac.uk/efo/efo.owl', 'http://www.ebi.ac.uk/arrayexpress/']
 # Publications - - special parsing in code
   - - ['Publication Title', 'Publication Author List', 'PubMed ID', 'Publication DOI']
-    - ['project_0', 'publications']
+    - ['project', 'publications']
 # Experiment Type
   - - 'Comment[AEExperimentType]'
     - 'RNA-seq of coding RNA from single cells'
@@ -62,74 +62,74 @@ sdrf:
 # According for Silvie, this should work fine for Smart-seq2 (each well contains a cell that is considered a single biological replicate)
 # When we come to processing 10x experiments, there is a concept of single (multi-cell) biological sample that is later (e.g. FACS-)separated into
 # individual cells. We will then need to find out where in HCA json an id, unique to the above multi-cell sample is stored, and take it from there.
-    - ['cell_suspension_0', 'biomaterial_core', 'biomaterial_id']
-# HCA bundle uuid - special handling - assign the uuid of the current bundle
-  - - 'Comment[HCA bundle uuid]'
+    - ['cell_suspension', 'biomaterial_core', 'biomaterial_id']
+# HCA bundle url - special handling - assign the url (includes uuid + version) of the current bundle
+  - - 'Comment[HCA bundle url]'
     - []
   - - 'Comment[HCA file uuid]'
     - ['provenance','document_id']    
   - - 'Comment[Sample_description]'
-    - ['specimen_from_organism_0', 'biomaterial_core', 'biomaterial_description']
+    - ['specimen_from_organism', 'biomaterial_core', 'biomaterial_description']
   - - 'Comment[biomaterial name]'
-    - ['specimen_from_organism_0', 'biomaterial_core', 'biomaterial_name']
+    - ['specimen_from_organism', 'biomaterial_core', 'biomaterial_name']
   - - 'Characteristics[immunophenotype]'
     - ['enrichment_protocol', 'markers']
   - - 'Comment[plate id]'
-    - ['cell_suspension_0', 'plate_based_sequencing', 'plate_id']
+    - ['cell_suspension', 'plate_based_sequencing', 'plate_id']
   - - 'Comment [well]'
-    - ['cell_suspension_0', 'plate_based_sequencing', 'well_id']
+    - ['cell_suspension', 'plate_based_sequencing', 'well_id']
   - - 'Characteristics[age]'
-    - ['donor_organism_0', 'organism_age']
+    - ['donor_organism', 'organism_age']
   - - 'Unit [time unit]'
-    - ['donor_organism_0', 'organism_age_unit', 'text']
+    - ['donor_organism', 'organism_age_unit', 'text']
   - - 'Characteristics[biosource provider]'
-    - ['specimen_from_organism_0', 'purchased_specimen', 'manufacturer']
+    - ['specimen_from_organism', 'purchased_specimen', 'manufacturer']
   - - 'Characteristics[body mass index]'
-    - ['donor_organism_0', 'human_specific', 'body_mass_index']
+    - ['donor_organism', 'human_specific', 'body_mass_index']
   - - 'Unit[concentration unit]'
     - ''
   - - 'Characteristics[cause of death]'
-    - ['donor_organism_0', 'death', 'cause_of_death']
+    - ['donor_organism', 'death', 'cause_of_death']
   - - 'Characteristics[cell line]'
-    - ['cell_line_0', 'biomaterial_core', 'biomaterial_name']
+    - ['cell_line', 'biomaterial_core', 'biomaterial_name']
   - - 'Characteristics[cell subtype surface markers]'
     - ['enrichment_protocol', 'markers']
   - - 'Characteristics[cell subtype]'
-    - ['cell_suspension_0', 'selected_cell_type']
+    - ['cell_suspension', 'selected_cell_type']
   - - 'Characteristics[cell type]'
-    - ['cell_line_0', 'cell_type', 'text']
+    - ['cell_line', 'cell_type', 'text']
   - - 'Characteristics[clinical information]'
-    - ['donor_organism_0', 'medical_history', 'test_results']
+    - ['donor_organism', 'medical_history', 'test_results']
   - - 'Characteristics[disease]'
-    - ['donor_organism_0', 'diseases']
+    - ['donor_organism', 'diseases']
   - - 'Characteristics[ethnic group]'
-    - ['donor_organism_0', 'human_specific', 'ethnicity']
+    - ['donor_organism', 'human_specific', 'ethnicity']
   - - 'Characteristics[genotype]'
-    - ['(specimen\_from\_organism|cell\_suspension|cell\_line|donor\_organism)\_0', 'biomaterial_core', 'genotype']
+    - ['(specimen\_from\_organism|cell\_suspension|cell\_line|donor\_organism)', 'biomaterial_core', 'genotype']
   - - 'Characteristics[geographical location]'
-    - ['process\_\d', 'process_core', 'process_location']
+    - ['process', 'process_core', 'process_location']
   - - 'Characteristics[individual]'
-    - ['donor_organism_0', 'biomaterial_core', 'biomaterial_id']
+    - ['donor_organism', 'biomaterial_core', 'biomaterial_id']
   - - 'Characteristics[developmental stage]'
-    - ['donor_organism_0', 'development_stage', 'text']
+    - ['donor_organism', 'development_stage', 'text']
   - - 'Characteristics[organism part]'
-    - ['specimen_from_organism_0', 'organ', 'text']
+    - ['specimen_from_organism', 'organ', 'text']
   - - 'Characteristics[organism status]'
-    - ['donor_organism_0', 'is_living']
+    - ['donor_organism', 'is_living']
   - - 'Characteristics[organism]'
-    - ['specimen_from_organism_0', 'genus_species']
+    - ['specimen_from_organism', 'genus_species']
   - - 'Characteristics[phenotype]'
     - ''
   - - 'Characteristics[sampling site]'
     - ''
   - - 'Characteristics[sex]'
-    - ['donor_organism_0', 'sex']
+    - ['donor_organism', 'sex']
   - - 'Characteristics[single cell quality]'
-    - ['cell_suspension_0', 'plate_based_sequencing', 'cell_quality']
+    - ['cell_suspension', 'plate_based_sequencing', 'cell_quality']
   - - 'Characteristics[strain]'
-    - ['donor_organism_0', 'mouse_specific', 'strain']
+    - ['donor_organism', 'mouse_specific', 'strain']
   - - 'Characteristics[submitted single cell quality]'
-    - ['cell_suspension_0', 'plate_based_sequencing', 'cell_quality']
+    - ['cell_suspension', 'plate_based_sequencing', 'cell_quality']
   - - 'Material Type'
     - 'cell'
 # Protocols - special handling in code
@@ -145,7 +145,7 @@ sdrf:
   - - 'Protocol REF'
     - ['library_preparation_protocol']
   - - 'Extract Name'
-    - ['cell_suspension_0', 'biomaterial_core', 'biomaterial_id']  
+    - ['cell_suspension', 'biomaterial_core', 'biomaterial_id']
   - - 'Comment[single cell isolation]'
     - ['enrichment_protocol', 'enrichment_method', 'text']
   - - 'Comment[input molecule]'
@@ -194,7 +194,7 @@ sdrf:
   - - 'Protocol REF'
     - ['sequencing_protocol']
   - - 'Assay Name'
-    - ['cell_suspension_0', 'biomaterial_core', 'biomaterial_id']
+    - ['cell_suspension', 'biomaterial_core', 'biomaterial_id']
   - - 'Comment[technical replicate group]'
     - ['technical_replicate_group']
   - - 'Technology Type'
@@ -211,36 +211,42 @@ hca_api_url_root: 'https://dss.data.humancellatlas.org/v1'
 notfound: 'NOTFOUND'
 curate: 'CURATE'
 protocol_types : ['differentiation_protocol', 'dissociation_protocol', 'enrichment_protocol', 'library_preparation_protocol', 'sequencing_protocol']
-test_max_bundles: 1
-# Don't cache sequence file, process or links json files - as these typically change for every bundle, thus caching them would be a waste of memory
-hca_json_files_excluded_from_cache_regex: '^sequence\_file\_\d+$|^process\_\d+$|^links$'
+test_max_bundles: 500
 # Various HCA json schema fields used throughout the code:
-hca_sequence_file_regex: '^sequence\_file\_\d+$'
-hca_analysis_file_regex: 'analysis_file_\w+\.json$'
+hca_sequence_file: 'sequence_file'
+hca_analysis_file_regex: 'analysis_file'
 hca_protocol_schema_regex: '\_protocol$'
-hca_project_json_file_name: "project_0"
 # The string fields 'geo_series', 'insdc_study' have been replaced with arrays: 'geo_series_accessions' and 'insdc_study_accessions' respectively
 # c.f. https://github.com/HumanCellAtlas/metadata-schema/blob/master/json_schema/type/project/project.json
 # but that migration is not reflected in https://github.com/HumanCellAtlas/metadata-schema/blob/master/json_schema/property_migrations.json - hence the explicit config below
 hca_old_secondary_accessions_labels: ['geo_series', 'insdc_study']
 hca_new_secondary_accessions_labels: ['geo_series_accessions', 'insdc_study_accessions']
-hca_schema_version_field_name: "describedBy"
+hca_schema_version_field_name: 'describedBy'
 # The string field 'array_express_investigation' has been replaced with an array field: 'array_express_accessions'
 # c.f. https://github.com/HumanCellAtlas/metadata-schema/blob/master/json_schema/type/project/project.json
 # but that migration is not reflected in https://github.com/HumanCellAtlas/metadata-schema/blob/master/json_schema/property_migrations.json - hence the explicit config below
-hca_old_arrayexpress_label: "array_express_investigation"
-hca_new_arrayexpress_label: "array_express_accessions"
-hca_supplementary_links_label: "supplementary_links"
-hca_project_uuid_elasticsearch_path: "files.project_json.provenance.document_id"
-hca_project_json_path: ['metadata', 'files', 'project_json']
+hca_old_arrayexpress_label: 'array_express_investigation'
+hca_new_arrayexpress_label: 'array_express_accessions'
+hca_supplementary_links_label: 'supplementary_links'
+hca_project: 'project'
+hca_project_json: ['project_json']
+hca_files_path: ['metadata', 'files']
+hca_bundle_url: ['bundle_url']
 hca_project_uuid_path: ['provenance', 'document_id']
 hca_project_title_path: ['project_core', 'project_title']
 hca_file_json_path: ['metadata', 'manifest', 'files']
 hca_file_json_name_path: ['name']
+hca_protocol_name_path: ['protocol_core', 'protocol_id']
+hca_protocol_description_path: ['protocol_core', 'protocol_description']
+hca_protocol_type_path: ['protocol_core', 'protocol_name']
+hca_publication_title_path: ['publication_title']
+hca_publication_authors_path: ['authors']
+hca_publication_pmid_path: ['pmid']
+hca_publication_doi_path: ['doi']
 
 # The above config refers to json files of the following HCA schemas with _0 postfix explicitly, and thus follows an implicit assumption that 
 # for a single bundle only one json file exists per schema in the list below. This list is used by the code to test data retrieved from HCA and
-# report a warning (TODO: should be error) if that assumption is broken.
+# report a warning if that assumption is broken.
 hca_schemas_with_one_json_per_bundle_expected: ['cell_line', 'cell_suspension', 'donor_organism', 'project', 'specimen_from_organism']
 
 cv_translate:

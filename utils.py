@@ -6,34 +6,21 @@ import fnmatch
 import re
 import yaml
 import logging
-import json
 import smtplib
 from orderedset import OrderedSet
 from collections import OrderedDict
-import requests, requests.packages.urllib3.util.retry
+
 from email.mime.text import MIMEText
 
+# Constants
 # Sending an email via smtplib occassionally throws a '[Errno 111] Connection refused' - the constants below controls
 # how many times the code should re-try re-sending the email, and how long to sleep between each attempt (secs)
 MAXIMUM_NUMBER_OF_EMAIL_ATTEMPTS = 5
 EMAIL_RETRY_INTERVAL = 5
 
-# Experiment errors class
+# HCA to MAGETAB translation errors class
 class HCA2MagetabTranslationError(Exception):
     pass
-
-# For HTTP semantics of re-try logic required see: https://dss.integration.data.humancellatlas.org/
-class RetryPolicy(requests.packages.urllib3.util.retry.Retry):
-    def __init__(self, retry_after_status_codes={301}, **kwargs):
-        super(RetryPolicy, self).__init__(**kwargs)
-        self.RETRY_AFTER_STATUS_CODES = frozenset(retry_after_status_codes | requests.packages.urllib3.util.retry.Retry.RETRY_AFTER_STATUS_CODES)
-
-retry_policy = RetryPolicy(read=5, status=5, status_forcelist=frozenset({500, 502, 503, 504}))
-s = requests.Session()
-a = requests.adapters.HTTPAdapter(max_retries=retry_policy)
-s.mount('https://', a)
-
-# Constants
 
 def unix_time_millis(dt):
     epoch = datetime.utcfromtimestamp(0)
@@ -78,39 +65,22 @@ def get_magetab_equivalent(magetab_label, hca_value, config):
 
 # Retrieve value that corresponds to magetab_label in hca_data_structure, populated from json files in study_uuid's bundle_uuid.
 # To access that value traverse hca_data_structure recursively using keys in list: hca_schema_path in turn.
-# If no value is found, check if the required HCA schema location was affected by a migration - according to property_migrations
-def get_hca_value(accession, magetab_label, hca_schema_path, hca_data_structure, project_bundle_uuids, logger, config, property_migrations, warn_of_missing_fields_in_hca_json):
-    value = get_hca_value_for_path(hca_schema_path, hca_data_structure, logger, config, warn_of_missing_fields_in_hca_json, accession, magetab_label, project_bundle_uuids)
-    if value == get_val(config, 'notfound'):
-        # Now check to see if key may be missing due to a HCA property migration
-        # Example describedBy value: https://schema.humancellatlas.org/type/project/9.0.3/project
-        describedBy = get_val(config, 'hca_schema_version_field_name')
-        if hca_schema_path[0] in hca_data_structure:
-            # We need describedBy_version to be able to check if a schema migration applies; if hca_schema_path[0] cannot be found in hca_data_structure, we don't have describedBy_version.
-            # In such cases, this bundle does not have data in schema: hca_schema_path[0]
-            describedBy_version = hca_data_structure[hca_schema_path[0]][describedBy].split('/')[-2]
-            migrated_schema_path = get_migrated_location(property_migrations, describedBy_version, hca_schema_path, logger)
-            if migrated_schema_path:
-                value = get_hca_value_for_path(migrated_schema_path, hca_data_structure, logger, config, warn_of_missing_fields_in_hca_json, accession, magetab_label, project_bundle_uuids)
-    return value
-
-# Retrieve value that corresponds to magetab_label in hca_data_structure, populated from json files in study_uuid's bundle_uuid.
-# To access that value traverse hca_data_structure recursively using keys in list: hca_schema_path in turn.
-def get_hca_value_for_path(hca_schema_path, hca_data_structure, logger, config, warn_of_missing_fields_in_hca_json, accession = None, magetab_label = None, project_bundle_uuids = None):
+def get_hca_value(hca_schema_path, hca_data_structure, logger, config, warn_of_missing_fields_in_hca_json, magetab_label = None, context = None):
     leaf = None
+    struct = hca_data_structure
     for key in hca_schema_path:
-        if key in list(hca_data_structure.keys()):
-            if isinstance(hca_data_structure[key], dict):
-                # Continue traversing if hca_data_structure[key] is a Dict
-                hca_data_structure = hca_data_structure[key]
+        if key in struct:
+            if isinstance(struct[key], dict):
+                # Continue traversing if struct[key] is a Dict
+                struct = struct[key]
             else:
                 # leaf could be string or a list, but never a Dict
-                leaf = hca_data_structure[key]
+                leaf = struct[key]
         else:
             leaf = get_val(config, 'notfound')
             if warn_of_missing_fields_in_hca_json:
-                if accession and magetab_label and project_bundle_uuids:
-                    context_info = " for accession: %s, magetab label: '%s' from HCA json for study: %s bundle (row): %s" % (accession, magetab_label, project_bundle_uuids[0], project_bundle_uuids[1])
+                if context and magetab_label:
+                    context_info = " for accession: %s, magetab label: '%s' from HCA json for study: %s bundle (row): %s" % (context[0], magetab_label, context[1], context[2])
                 else:
                     context_info=""
                 logger.warning("Key: '%s' (in %s) is missing%s" % (key, hca_schema_path, context_info))
@@ -120,23 +90,6 @@ def get_hca_value_for_path(hca_schema_path, hca_data_structure, logger, config, 
 # Returns True if version1 is the same or lower than version2
 def hca_versions_in_asc_order(version1, version2):
     return int(version1.replace('.','')) <= int(version2.replace('.',''))
-
-# Retrieve from property_migrations a new path to which hca_schema_path was migrated - if one exists for version on or later than describedBy_version
-def get_migrated_location(property_migrations, describedBy_version, hca_schema_path, logger):
-    hca_key = hca_schema_path[0]
-    source_schema = re.sub(r"\_\d+$", "", hca_key)
-    property = '.'.join(hca_schema_path[1:])
-    m = re.search(r"\_\d+$", hca_key)
-    postfix = ''
-    if m != None:
-        postfix = m.group(0)
-    migrated_schema_path = None
-    for entry in property_migrations['migrations']:
-        if source_schema == entry['source_schema'] and property == entry['property'] and hca_versions_in_asc_order(entry['effective_from'], describedBy_version):
-            migrated_schema_path = [entry['target_schema'] + postfix] +  entry['replaced_by'].split('.')
-            logger.warning("Replacing %s with %s due to property migration from %s onwards" % ('.'.join(hca_schema_path), '.'.join(migrated_schema_path), entry['effective_from']))
-            break
-    return migrated_schema_path
 
 # Add characteristic->value for characteristic to dict: characteristic_values
 # N.B. The values in characteristic_values are sets, as this dict is later used in deciding which characteristic should
@@ -163,31 +116,6 @@ def add_to_row(indexes_of_non_empty_sdrf_columns, sdrf_column_headers, sdrf_colu
         indexes_of_non_empty_sdrf_columns.add(len(sdrf_column_headers)-1)
     row.append(value)
 
-# Retrieve json from url via method (passing data in the call, if method == 'post')
-# Returns a tuple: (<result (json)>, <returned headers dict (for 'post' only)>)
-def get_remote_json(url, logger, method = 'get', data = None):
-    result = None
-    headers = None
-    err_msg = None
-    try:
-        if method == 'get':
-            r = s.get(url)
-        elif method == 'post':
-            r = s.post(url, data = json.dumps(data), headers = { "Accept" : "application/json", "Content-Type" : "application/json" })
-        else:
-            err_msg = 'Unknown HTTP request method: "' + url + '" : ' + method
-        result = json.loads(r.text)
-        headers = r.headers
-    except requests.HTTPError as e:
-        err_msg = 'HTTPError when retrieving url: "' + url + '" : ' + str(e.code)
-        logger.error(err_msg)
-    except requests.ConnectionError as e:
-        err_msg = 'ConnectionError when retrieving url: "' + url + '" : ' + str(e.reason)
-        logger.error(err_msg)
-    if err_msg:
-        raise HCA2MagetabTranslationError(err_msg)
-    return (result, headers)
-
 # Return the url for the next page of results - having extract it via 'Link' key from dict: headers (itself return by the previous api call)
 def get_api_url_for_next_page(headers):
     url = None
@@ -196,92 +124,6 @@ def get_api_url_for_next_page(headers):
         if m:
             url = m.group(1)
     return url
-
-# Retrieve the list of unique project uuids, corresponding to all HCA projects of type: technology
-def get_project_uuid2accessions_for_technology(hca_api_url_root, logger, technology, ncbi_taxon_id, config):
-    project_uuid2accession = {}
-    smart_regex = re.compile('smart-.*$')
-    tenxV2_regex = re.compile('10xV2')
-    if smart_regex.match(technology):
-        data = { "es_query": {
-                     "query": {
-                         "bool": {
-                             "must": [
-                                 # Smart - seq2
-                                 { "match": { "files.library_preparation_protocol_json.library_construction_approach.ontology": "EFO:0008931" } },
-                                 { "match": { "files.donor_organism_json.biomaterial_core.ncbi_taxon_id": ncbi_taxon_id } }
-                             ],
-                             "should": [
-                                 # fluorescence - activated cell sorting
-                                 { "match": { "files.dissociation_protocol_json.dissociation_method.ontology": "EFO:0009108" } },
-                                 # enzymatic dissociation
-                                 { "match": { "files.dissociation_protocol_json.dissociation_method.ontology": "EFO:0009128"}},
-                                 { "match": { "files.dissociation_protocol_json.dissociation_method.text": "mouth pipette" } }
-                             ], "must_not": [
-                                 { "match": { "files.analysis_process_json.process_type.text": "analysis" } },
-                                 { "range": { "files.donor_organism_json.biomaterial_core.ncbi_taxon_id": { "lt": ncbi_taxon_id } } },
-                                 { "range": { "files.donor_organism_json.biomaterial_core.ncbi_taxon_id": { "gt": ncbi_taxon_id } } }
-                             ] } } } }
-    elif tenxV2_regex.match(technology):
-        data = { "es_query": {
-                     "query": {
-                         "bool": {
-                             "must": [
-                                 # 10X v2 sequencing
-                                 # TODO: what is the EFO number for 10xV1* and 10xV3?
-                                 { "match": { "files.library_preparation_protocol_json.library_construction_approach.ontology": "EFO:0009310" } },
-                                 { "match": { "files.donor_organism_json.biomaterial_core.ncbi_taxon_id": ncbi_taxon_id } }
-                             ],
-                             "must_not": [
-                                 { "match": { "files.analysis_process_json.process_type.text": "analysis" } },
-                                 { "range": { "files.donor_organism_json.biomaterial_core.ncbi_taxon_id": { "lt": ncbi_taxon_id } } },
-                                 { "range": { "files.donor_organism_json.biomaterial_core.ncbi_taxon_id": { "gt": ncbi_taxon_id } } }
-                             ] } } } }
-    else:
-        raise HCA2MagetabTranslationError('Unknown technology: %s' % technology)
-    # page size: 500 is the maximum allowed by HCA
-    url = '%s/%s' % (hca_api_url_root, 'search?output_format=raw&replica=aws&per_page=500')
-    json = get_remote_json(url, logger, 'post', data)[0]
-    for result in json['results']:
-        for project_json in get_hca_value_for_path(get_val(config, 'hca_project_json_path'), result, logger, config, True):
-            project_uuid = get_hca_value_for_path(get_val(config, 'hca_project_uuid_path'), project_json, logger, config, True)
-            project_title = get_hca_value_for_path(get_val(config, 'hca_project_title_path'), project_json, logger, config, True)
-            gxa_accessions = OrderedSet([])
-            if re.search('Test *$', project_title):
-                # Skip test data sets
-                continue
-            # E-AAAA-00 appears to be the default value HCA uses when no ArrayExpress accession is available
-            hca_old_arrayexpress_label = get_val(config, 'hca_old_arrayexpress_label')
-            hca_new_arrayexpress_label = get_val(config, 'hca_new_arrayexpress_label')
-            if hca_old_arrayexpress_label in project_json.keys():
-                if project_json[hca_old_arrayexpress_label] != 'E-AAAA-00':
-                    gxa_accessions.add(project_json[hca_old_arrayexpress_label])
-            elif hca_new_arrayexpress_label in project_json.keys():
-                # For the reason for the loop below see a comment near hca_old_arrayexpress_label in hca2mtab.yml
-                for gxa_accession in project_json[hca_new_arrayexpress_label]:
-                    gxa_accessions.add(gxa_accession)
-            hca_supplementary_links_label = get_val(config, 'hca_supplementary_links_label')
-            if hca_supplementary_links_label in project_json.keys():
-                for url in project_json[hca_supplementary_links_label]:
-                    m = re.search(r'^.*?\/(E-\w{4}-\d+).*$', url)
-                    if m:
-                        gxa_accessions.add(m.group(1))
-            # If HCA project uuid corresponds to multiple existing gxa accessions, we join them into a single label - the decision on how to split them into separate experiments is left to gxa curators
-            if len(gxa_accessions) > 0:
-                accession = ''.join(gxa_accessions)
-            else:
-                accession = None
-            project_uuid2accession[project_uuid] = accession
-    return project_uuid2accession
-
-# Retrieve the set of unique project uuids, corresponding to all smart-seq2 and 10x projects in HCA.
-def get_all_hca_project_uuids(hca_api_url_root, config, logger):
-    project_uuid2accession = {}
-    for technology in get_val(config, 'technology_mtab2hca').keys():
-        for ncbi_taxon_id in [9606, 10090]:
-            # human and mouse
-            project_uuid2accession.update(get_project_uuid2accessions_for_technology(hca_api_url_root, logger, technology, ncbi_taxon_id, config))
-    return project_uuid2accession
 
 # Retrieve HCA project uuid from idf_file_path
 def get_project_uuid_from_idf(idf_file_path):
@@ -293,9 +135,20 @@ def get_project_uuid_from_idf(idf_file_path):
                 break
     return project_uuid
 
+
+# Return a list of unique project uuids already imported from HCA
+def get_previously_imported_projects(data_dir):
+    project_uuids = set([])
+    gxa_acc_regex_obj = re.compile('(E-\w{4}-\d+)+\.idf\.txt')
+    for file_name in os.listdir(data_dir):
+        if gxa_acc_regex_obj.match(file_name):
+            project_uuid = get_project_uuid_from_idf(os.path.join(data_dir, file_name))
+            project_uuids.add(project_uuid)
+    return list(project_uuids)
+
 # Return a mapping between hca project uuids and accessions - either already existing in gxa_dir (we're updating an
 # experiment previously imported from HCA) or newly minted E-CAND-* accession (for experiments about to be imported from HCA for the first time)
-def get_gxa_accession_for_project_uuid(gxa_dir, project_uuid2accession):
+def resolve_gxa_accession_for_project_uuid(gxa_dir, project_uuid2accession):
     # An auxiliary list used to enable minting of E-CAND-* accessions
     candidate_experiments = []
 
@@ -326,59 +179,6 @@ def get_gxa_accession_for_project_uuid(gxa_dir, project_uuid2accession):
             maximum_candidate_exp_num += 1
 
     return project_uuid2accession
-
-# For a given project uuid, retrieve dict: bundle uuid->list of (file_uuid, file_name) tuples
-# N.B. if mode == 'test', retrieve only the first page of results
-def get_bundle2metadata_files_for_project_uuid(project_uuid, hca_api_url_root, mode, logger, config):
-    bundle2metadata_files = {}
-    hca_project_uuid_elasticsearch_path = get_val(config, 'hca_project_uuid_elasticsearch_path')
-    data = { "es_query": { "query": { "match": { hca_project_uuid_elasticsearch_path : project_uuid }}}}
-    # Page size = 10 appears to be the maximum currently allowed
-    url = '%s/%s' % (hca_api_url_root, 'search?output_format=raw&replica=aws&per_page=10')
-    bundle_cnt = 0
-    while url:
-        bundle_cnt += 10
-        print('.', end = '', flush = True)
-        (json, headers) = get_remote_json(url, logger, 'post', data)
-        for result in json['results']:
-            bundle_url = result['bundle_url']
-            metadata_files = []
-            m = re.search(r'/bundles/([\w\d\-]+)\?', bundle_url)
-            if m:
-                bundle_uuid = m.group(1)
-            else:
-                err_msg = "Failed to retrieve bundle uuid for project uuid: %s from url: %s" % (project_uuid, bundle_url)
-                logger.error(err_msg)
-                raise HCA2MagetabTranslationError(err_msg)
-            analysis_bundle = False
-            for file_json in get_hca_value_for_path(get_val(config, 'hca_file_json_path'), result, logger, config, True):
-                file_name = get_hca_value_for_path(get_val(config, 'hca_file_json_name_path'), file_json, logger, config, True)
-                if re.search(r"" + get_val(config, 'hca_analysis_file_regex'), file_name):
-                    analysis_bundle = True
-                elif re.search(r'\.json$', file_name):
-                    metadata_files.append((file_json['uuid'], file_name))
-            if not analysis_bundle:
-                # Exclude analysis bundles from being loaded into gxa
-                bundle2metadata_files[bundle_uuid] = metadata_files
-        url = get_api_url_for_next_page(headers)
-        if mode == 'test' and bundle_cnt >= get_val(config, 'test_max_bundles'): 
-            break
-    return bundle2metadata_files
-
-# Retrieve ArrayExpress single-cell technology name, corresponding to hca_technology
-def get_gxa_technology(hca_technology, config):
-    # technology_mtab2hca list contains the mapping between a single-cell technlogy valid in ArrayExpress
-    # (c.f. https://www.ebi.ac.uk/seqdb/confluence/pages/viewpage.action?spaceKey=GXA&title=6.+Single-Cell+Curation+Guide)
-    # and the list of its synonyms in HCA (for now we're assuming there could be more than one synonym)
-    technology_mtab2hca = get_val(config, 'technology_mtab2hca')
-    gxa_technology = None
-    for key in technology_mtab2hca:
-        for val in technology_mtab2hca[key]:
-            hca_technology_regex = re.compile(val)
-            if hca_technology_regex.match(hca_technology):
-                gxa_technology = key
-                break
-    return gxa_technology
 
 # Return True if it would be 'valid' to insert col_name to the end of sdrf_column_headers.
 # The position is deemed 'valid' if:
@@ -473,37 +273,20 @@ def email_report(subject, body, sender, email_recipients):
     else: # we never broke out of the for loop
         raise RuntimeError("Maximum number of unsuccessful attempts to email validation report reached for imported experiments report")
 
-# Retrieve into hca_json/hca_json_cache all the json files for bundle_uuid
-def retrieve_hca_json_for_bundle(accession, bundle2metadata_files, project_bundle_uuids, hca_json, hca_json_cache, hca_api_url_root, config, logger, warn_of_missing_fields):
-    # Iterate over (file_uuid, file_name) tuples corresponding to bundle_uuid
-    for (file_uuid, file_name) in bundle2metadata_files[project_bundle_uuids[1]]:
-        file_type = file_name.split('.')[0]
-        if warn_of_missing_fields and violates_hca_schema_assumptions(file_type, config):
-            logger.warning("File type: %s for project uuid: %s ; bundle uuid: %s ; accession: %s violates the assumption that only _0.json file for that type should exist in a bundle" % (file_type, project_bundle_uuids[0], project_bundle_uuids[1], accession))
-        # Retrieve the json for file_uuid from cache if it's there; otherwise retrieve it from HCA DCC and add to the cache
-        if file_uuid not in hca_json_cache.keys():
-            file_json_url = '%s/files/%s?replica=aws' % (hca_api_url_root, file_uuid)
-            logger.debug('project uuid: %s ; bundle uuid: %s ; Accession: %s - About to retrieve file (of type: %s) : %s ' % (project_bundle_uuids[0], project_bundle_uuids[1], accession, file_type, file_json_url))
-            row_data = get_remote_json(file_json_url, logger)[0]
-            if not re.search(r"" + get_val(config, 'hca_json_files_excluded_from_cache_regex'), file_name):
-                hca_json_cache[file_uuid] = row_data
-            # Store retrieved json in hca_json[file_type]
-            hca_json[file_type] = row_data
-        else:
-            # json is in cache - retrieve from there
-            hca_json[file_type] = hca_json_cache[file_uuid]
-
-        logger.debug("%s : %s --> %s" % (accession, file_name, hca_json[file_type]))
-
-# Return True if file_type violates our assumption that there should exist only one (_0.json) file for tha type in a HCA bundle
-def violates_hca_schema_assumptions(file_type, config):
-    schema_type = re.sub(r"\_\d+$", "", file_type)
-    if schema_type in get_val(config, 'hca_schemas_with_one_json_per_bundle_expected'):
-        m = re.search(r'\d+$', file_type)
-        if m != None:
-            suffix = int(m.group(0))
-            return suffix > 0
-    return False
+# Retrieve ArrayExpress single-cell technology name, corresponding to hca_technology
+def get_gxa_technology(hca_technology, config):
+    # technology_mtab2hca list contains the mapping between a single-cell technlogy valid in ArrayExpress
+    # (c.f. https://www.ebi.ac.uk/seqdb/confluence/pages/viewpage.action?spaceKey=GXA&title=6.+Single-Cell+Curation+Guide)
+    # and the list of its synonyms in HCA (for now we're assuming there could be more than one synonym)
+    technology_mtab2hca = get_val(config, 'technology_mtab2hca')
+    gxa_technology = None
+    for key in technology_mtab2hca:
+        for val in technology_mtab2hca[key]:
+            hca_technology_regex = re.compile(val)
+            if hca_technology_regex.match(hca_technology):
+                gxa_technology = key
+                break
+    return gxa_technology
         
 version = '0.1'
 # End of utils.py
