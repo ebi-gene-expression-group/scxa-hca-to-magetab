@@ -13,4 +13,4 @@ python hca2mtab.py test .
 ## Test run output
 - N.B. The test run restricts the number of bundles retrieved from HCA DCC to maximum 500 per technology)
 - The experimental metadata in MAGETAB format for the imported HCA projects can be found in \your\local\working\dir
-- The log file for your test run in \your\local\working\dir\hca2mtab.test.YYYY-MM-DD.log
+- The log file for your test run in \your\local\working\dir\logs\hca2mtab.test.YYYY-MM-DD.log
