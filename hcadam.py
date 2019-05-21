@@ -55,7 +55,7 @@ def get_remote_json(url, logger, method = 'get', data = None):
     return (result, headers)
 
 # Retrieve the list of unique project uuids, corresponding to all HCA projects of type: technology
-def get_hca_projects_for_technology(hca_api_url_root, technology, ncbi_taxon_id, already_imported_project_uuids, config, mode, logger):
+def get_hca_projects_for_technology(hca_api_url_root, technology, ncbi_taxon_id, project_uuids_filter, already_imported_project_uuids, config, mode, logger):
     logger.info("About to retrieve HCA projects and their json content for technology: %s ncbi_taxon_id: %d" % (technology, ncbi_taxon_id))
     time_start = utils.unix_time_millis(datetime.now())
     project_uuids = set([])
@@ -111,10 +111,10 @@ def get_hca_projects_for_technology(hca_api_url_root, technology, ncbi_taxon_id,
             project_json_path = utils.get_val(config, 'hca_files_path') + utils.get_val(config, 'hca_project_json')
             project_json = get_hca_structure_for_path(project_json_path, bundle)[0]
             project_title = utils.get_hca_value(utils.get_val(config, 'hca_project_title_path'), project_json, logger, config, True)
-            if re.search('Test *$', project_title):
-                # Skip test data sets
-                continue
             project_uuid = utils.get_hca_value(utils.get_val(config, 'hca_project_uuid_path'), project_json, logger, config, True)
+            if re.search('Test *$', project_title) or (project_uuids_filter and project_uuid not in project_uuids_filter):
+                # Skip test data sets, or sets not in the list specifically requested to be imported
+                continue
             if project_uuid not in already_imported_project_uuids:
                 # In new_only mode already_imported_project_uuids may not be empty - we only include project_uuids (and cache their json)
                 # if they have not been imported already.
@@ -141,12 +141,12 @@ def get_api_url_for_next_page(headers):
     return url
 
 # Retrieve the set of unique project uuids, corresponding to all smart-seq2 and 10x projects in HCA.
-def get_hca_project_uuid_to_import(hca_api_url_root, config, mode, already_imported_project_uuids, logger):
+def get_hca_project_uuid_to_import(hca_api_url_root, config, mode, project_uuids_filter, already_imported_project_uuids, logger):
     project_uuids = set([])
     for technology in utils.get_val(config, 'technology_mtab2hca').keys():
         for ncbi_taxon_id in [9606, 10090]:
             # human and mouse
-            project_uuids = project_uuids.union(get_hca_projects_for_technology(hca_api_url_root, technology, ncbi_taxon_id, already_imported_project_uuids, config, mode, logger))
+            project_uuids = project_uuids.union(get_hca_projects_for_technology(hca_api_url_root, technology, ncbi_taxon_id, project_uuids_filter, already_imported_project_uuids, config, mode, logger))
     for project_uuid in project_uuids:
         logger.info("Populated json cache for %s with %d bundles" % (project_uuid, len(list(hca_json_cache[project_uuid].keys()))))
     return project_uuids
