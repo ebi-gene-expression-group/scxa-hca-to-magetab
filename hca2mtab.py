@@ -20,12 +20,11 @@ process_name = 'hca2mtab'
 
 # Converts to magetab files bundles belonging to HCA uuid in the first element in each tuple in worklist.
 # The second element in each tuple is the accession to be used on the gxa side.
-# mode can be 'test', 'dryrun' or prod:
-# - 'test' retrieves just one bundle per project id
-# - 'dryrun' lists what project uuids would be retrieved and what gxa accessions they would be assigned to, and
+# mode can be 'test' o 'prod':
+# - 'test' retrieves just N bundle per project id, where N is defined in test_max_bundles field in config
 # - 'prod' is the norma production run
 # data_dir - directory in which the generated magetab files should be placed
-def convert_hca_json_to_magetab(mode, data_dir, sender, email_recipients, new_only = True):
+def convert_hca_json_to_magetab(mode, data_dir, new_only = True, sender = None, email_recipients = None ):
     # Retrieve the HCA Json to MAGETAB translation config
     config = utils.get_config(process_name)
     idf_config = utils.get_val(config, 'idf')
@@ -54,8 +53,6 @@ def convert_hca_json_to_magetab(mode, data_dir, sender, email_recipients, new_on
     logger.info("About to import from HCA DCC the following experiments:")
     for project_uuid in project_uuid2gxa_accession.keys():
         logger.info("%s -> %s" % (project_uuid, project_uuid2gxa_accession[project_uuid]))
-    if mode == 'dryrun':
-        sys.exit(0)
 
     # Metadata retrieve starts here
     for project_uuid in project_uuid2gxa_accession.keys():
@@ -436,22 +433,23 @@ def convert_hca_json_to_magetab(mode, data_dir, sender, email_recipients, new_on
         time_end = utils.unix_time_millis(datetime.now())
         duration = (time_end - time_start)/1000/60
         logger.info("Processing HCA study uuid: %s for gxa accession: %s took %d mins" % (project_uuid, accession, duration))
-    if imported_experiments:
+    if imported_experiments and sender and email_recipients:
         utils.email_report("New experiments imported from HCA DCC", '\n'.join(imported_experiments), sender, email_recipients)
 
 if __name__ == '__main__':
     # Capture call arguments
     if len(sys.argv) < 3:
         print('Call arguments needed, e.g. : ')
-        print(sys.argv)
-        print(sys.argv[0] + ' prod /magetab/output/path smith@ebi.ac.uk,jones@ebi.ac.uk')
+        print(sys.argv[0] + ' test /magetab/output/path hca2mtab@yourorg.com smith@ebi.ac.uk,jones@ebi.ac.uk')
         sys.exit(1)
 
     mode = sys.argv[1]
     data_dir = sys.argv[2]
-    sender = sys.argv[3]
-    email_recipients = sys.argv[4]
+    sender, email_recipients = None, None
+    if len(sys.argv) > 3:
+        sender = sys.argv[3]
+        email_recipients = sys.argv[4]
     try:
-        convert_hca_json_to_magetab(mode, data_dir, sender, email_recipients, True)
+        convert_hca_json_to_magetab(mode, data_dir, True, sender, email_recipients )
     except utils.HCA2MagetabTranslationError as exc:
         utils.email_report("%s error" % process_name, "%s has crashed with the following error: %s" % (process_name, str(exc)), sender, email_recipients)

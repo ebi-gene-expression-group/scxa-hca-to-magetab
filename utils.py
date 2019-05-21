@@ -2,12 +2,12 @@
 
 from datetime import datetime
 import os
-import fnmatch
+import errno
+import time
 import re
 import yaml
 import logging
 import smtplib
-from orderedset import OrderedSet
 from collections import OrderedDict
 
 from email.mime.text import MIMEText
