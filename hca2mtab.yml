@@ -214,6 +214,8 @@ protocol_types : ['differentiation_protocol', 'dissociation_protocol', 'enrichme
 test_max_bundles: 500
 # Various HCA json schema fields used throughout the code:
 hca_sequence_file: 'sequence_file'
+hca_donor_organism: 'donor_organism'
+hca_cell_suspension: 'cell_suspension'
 hca_analysis_file_regex: 'analysis_file'
 hca_protocol_schema_regex: '\_protocol$'
 # The string fields 'geo_series', 'insdc_study' have been replaced with arrays: 'geo_series_accessions' and 'insdc_study_accessions' respectively
@@ -247,7 +249,11 @@ hca_publication_doi_path: ['doi']
 # The above config refers to json files of the following HCA schemas with _0 postfix explicitly, and thus follows an implicit assumption that 
 # for a single bundle only one json file exists per schema in the list below. This list is used by the code to test data retrieved from HCA and
 # report a warning if that assumption is broken.
-hca_schemas_with_one_json_per_bundle_expected: ['cell_line', 'cell_suspension', 'donor_organism', 'project', 'specimen_from_organism']
+hca_schemas_with_one_json_per_bundle_expected: ['cell_line', 'project', 'specimen_from_organism']
+
+# The logic of the translation code outputs an sdrf line only if the list of JSON objects for schema: 'donor_organism' is not empty, and that
+# for each JSON object in 'donor_organism' list, there exists a corresponding JSON object (at the same position in) the 'cell_suspension' list.
+hca_schema_types_in_every_bundle: ['donor_organism', 'cell_suspension']
 
 cv_translate:
   'Characteristics[organism status]':

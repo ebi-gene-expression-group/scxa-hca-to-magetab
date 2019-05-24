@@ -123,117 +123,129 @@ def convert_hca_json_to_magetab(mode, data_dir, project_uuids_filter = None, new
             technology = None
             # Set of indexes of sdrf columns with non-empty sdrf columns for the current bundle_uuid
             indexes_of_non_empty_sdrf_columns = set([])
-            # Output one SDRF row per each sequence file in the bundle
-            for datafile_json in hca_json_for_bundle[utils.get_val(config, 'hca_sequence_file')]:
-                sdrf_column_headers = []
-                
-                current_row = []
-                for line_item in sdrf_config:
-                    magetab_label = line_item[0]
-                    hca_path = line_item[1]
-                    if isinstance(hca_path, list):
-                        if not utils.position_valid_for_sdrf_column(magetab_label, sdrf_column_headers, config):
-                            # Skip sdrf columns if the position in which they would be inserted would not be valid given the column just before: sdrf_column_headers[-1]
-                            continue                            
-                        elif magetab_label in ['Characteristics[geographical location]', 'Characteristics[genotype]']:
-                            # Special handling/parsing - geographical location - multiple json files need checking for field presence
-                            value = utils.get_val(config, 'notfound')
-                            regex = hca_path[0]
-                            for schema_type in list(hca_json_for_bundle.keys()):
-                                if re.search(r"" + regex, schema_type):
+            # Output one SDRF row per each donor - sequence file tuple in the bundle
+            # Assumptions relating to donors:
+            # 1. Every HCA bundle has at least one json object for both: donor_organism and cell_suspension
+            # 2. In the lists of json objects for donor_organism and cell_suspension respectively,
+            #    the first JSON in donor_organism list corresponds to the first JSON in the cell_suspension list, and so on..
+            cell_suspension_json_iter = iter(hca_json_for_bundle[utils.get_val(config, 'hca_cell_suspension')])
+            for donor_json in hca_json_for_bundle[utils.get_val(config, 'hca_donor_organism')]:
+                cell_suspension_json = cell_suspension_json_iter.__next__()
+                for datafile_json in hca_json_for_bundle[utils.get_val(config, 'hca_sequence_file')]:
+                    sdrf_column_headers = []
+
+                    current_row = []
+                    for line_item in sdrf_config:
+                        magetab_label = line_item[0]
+                        hca_path = line_item[1]
+                        if isinstance(hca_path, list):
+                            if not utils.position_valid_for_sdrf_column(magetab_label, sdrf_column_headers, config):
+                                # Skip sdrf columns if the position in which they would be inserted would not be valid given the column just before: sdrf_column_headers[-1]
+                                continue
+                            elif magetab_label in ['Characteristics[geographical location]', 'Characteristics[genotype]']:
+                                # Special handling/parsing - geographical location - multiple json files need checking for field presence
+                                value = utils.get_val(config, 'notfound')
+                                regex = hca_path[0]
+                                for schema_type in list(hca_json_for_bundle.keys()):
+                                    if re.search(r"" + regex, schema_type):
+                                        for json_dict in hca_json_for_bundle[schema_type]:
+                                            value = utils.get_hca_value(hca_path[1:], json_dict, logger, config, warn_of_missing_fields, magetab_label, context)
+                                            if value != utils.get_val(config, 'notfound'):
+                                                break
+                                utils.add_to_row(indexes_of_non_empty_sdrf_columns, sdrf_column_headers, magetab_label, value, current_row, characteristic_values, config)
+                            elif magetab_label == 'Protocol REF':
+                                protocol_type = hca_path[0]
+                                # TODO:
+                                # Note that before sdrf is output, we will need to split protocol_ids into separate columns, but not before processing all the bundles in the project - we have to wait till the
+                                # end to we know how many protocols per technology-protocol type we have. _In theory_ we could have 3 different enrichment protocols for a given technology in a project, e.g.
+                                # FACS3, FACS5 and FACS8, and for the current bundle protocol_ids = 'FACS3,FACS8'. Then before outputting sdrf we will have to 'explode' the 'Protocol REF' column corresponding
+                                # to the enrichment protocol into 3 (tab-delimited) new columns - and these columns for the current bundle_uuid will have values: 'FACS3\tFACS8\t' and
+                                # headers: 'Protocol REF\tProtocol REF\tProtocol REF'
+                                protocol_ids = ','.join([ x[0] for x in list(protocol_type2protocols_in_bundle[protocol_type]) ])
+                                utils.add_to_row(indexes_of_non_empty_sdrf_columns, sdrf_column_headers, magetab_label, protocol_ids, current_row, characteristic_values, config)
+                            elif len(hca_path) > 0 and re.search(r"" + utils.get_val(config, 'hca_protocol_schema_regex'), hca_path[0]):
+                                protocol_type = hca_path[0]
+                                # Special handling/parsing - for a given protocol_type, various protocol-related information needs to be collected from potentially multiple HCA json files
+                                values = set([])
+                                for schema_type in [x for x in hca_json_for_bundle.keys() if x == protocol_type]:
                                     for json_dict in hca_json_for_bundle[schema_type]:
                                         value = utils.get_hca_value(hca_path[1:], json_dict, logger, config, warn_of_missing_fields, magetab_label, context)
                                         if value != utils.get_val(config, 'notfound'):
-                                            break
-                            utils.add_to_row(indexes_of_non_empty_sdrf_columns, sdrf_column_headers, magetab_label, value, current_row, characteristic_values, config)
-                        elif magetab_label == 'Protocol REF':
-                            protocol_type = hca_path[0]
-                            # TODO:
-                            # Note that before sdrf is output, we will need to split protocol_ids into separate columns, but not before processing all the bundles in the project - we have to wait till the
-                            # end to we know how many protocols per technology-protocol type we have. _In theory_ we could have 3 different enrichment protocols for a given technology in a project, e.g. 
-                            # FACS3, FACS5 and FACS8, and for the current bundle protocol_ids = 'FACS3,FACS8'. Then before outputting sdrf we will have to 'explode' the 'Protocol REF' column corresponding
-                            # to the enrichment protocol into 3 (tab-delimited) new columns - and these columns for the current bundle_uuid will have values: 'FACS3\tFACS8\t' and
-                            # headers: 'Protocol REF\tProtocol REF\tProtocol REF'
-                            protocol_ids = ','.join([ x[0] for x in list(protocol_type2protocols_in_bundle[protocol_type]) ])
-                            utils.add_to_row(indexes_of_non_empty_sdrf_columns, sdrf_column_headers, magetab_label, protocol_ids, current_row, characteristic_values, config)
-                        elif len(hca_path) > 0 and re.search(r"" + utils.get_val(config, 'hca_protocol_schema_regex'), hca_path[0]):
-                            protocol_type = hca_path[0]
-                            # Special handling/parsing - for a given protocol_type, various protocol-related information needs to be collected from potentially multiple HCA json files
-                            values = set([])
-                            for schema_type in [x for x in hca_json_for_bundle.keys() if x == protocol_type]:
-                                for json_dict in hca_json_for_bundle[schema_type]:
+                                            if magetab_label == 'Comment[library construction]':
+                                                # Capture technology for the current bundle
+                                                hca_technology = value.lower()
+                                                technology = utils.get_gxa_technology(hca_technology, config)
+                                                value = technology
+                                            values.add(str(value))
+                                utils.add_to_row(indexes_of_non_empty_sdrf_columns, sdrf_column_headers, magetab_label, ', '.join(values), current_row, characteristic_values, config)
+                            elif magetab_label == 'Comment[HCA bundle url]':
+                                utils.add_to_row(indexes_of_non_empty_sdrf_columns, sdrf_column_headers, magetab_label, bundle_url, current_row, characteristic_values, config)
+                            elif magetab_label in ['Comment[RUN]', 'Comment[FASTQ_URI]', 'Scan Name', 'Comment[technical replicate group]', 'Comment[HCA file uuid]']:
+                                # Special handling/parsing - Comment[RUN] - datafile_key json file need checking for field presence
+                                value = utils.get_hca_value(hca_path, datafile_json, logger, config, warn_of_missing_fields, magetab_label, context)
+                                if magetab_label == 'Comment[RUN]':
+                                    # NB. We're stripping e.g. _2.fastq.gz from the end - to retain just the core file name
+                                    # Tested on the following types of file names:
+                                    # "FCA7167226_I1.fastq.gz", "MantonBM7_HiSeq_4_S19_L005_R2_001.fastq.gz", "E18_20160930_Neurons_Sample_57_S054_L005_I1_010.fastq.gz", "FCA7167226.fastq.gz"
+                                    value = re.sub(r"(\_\w\d|\_\w\d\_\d+|\_\d)*\.f\w+\.gz", "", value)
+                                utils.add_to_row(indexes_of_non_empty_sdrf_columns, sdrf_column_headers, magetab_label, value, current_row, characteristic_values, config)
+                            else:
+                                schema_type = hca_path[0]
+                                if schema_type in hca_json_for_bundle:
+                                    if schema_type == utils.get_val(config, 'hca_donor_organism'):
+                                        json_dict = donor_json
+                                    elif schema_type == utils.get_val(config, 'hca_cell_suspension'):
+                                        json_dict = cell_suspension_json
+                                    else:
+                                        # Retrieving the first element below follows the assumption of one single json object in schema_type in a bundle
+                                        # (all the special cases were handled above)
+                                        json_dict = hca_json_for_bundle[schema_type][0]
                                     value = utils.get_hca_value(hca_path[1:], json_dict, logger, config, warn_of_missing_fields, magetab_label, context)
-                                    if value != utils.get_val(config, 'notfound'):
-                                        if magetab_label == 'Comment[library construction]':
-                                            # Capture technology for the current bundle
-                                            hca_technology = value.lower()
-                                            technology = utils.get_gxa_technology(hca_technology, config)
-                                            value = technology
-                                        values.add(str(value))
-                            utils.add_to_row(indexes_of_non_empty_sdrf_columns, sdrf_column_headers, magetab_label, ', '.join(values), current_row, characteristic_values, config)
-                        elif magetab_label == 'Comment[HCA bundle url]':
-                            utils.add_to_row(indexes_of_non_empty_sdrf_columns, sdrf_column_headers, magetab_label, bundle_url, current_row, characteristic_values, config)
-                        elif magetab_label in ['Comment[RUN]', 'Comment[FASTQ_URI]', 'Scan Name', 'Comment[technical replicate group]', 'Comment[HCA file uuid]']:
-                            # Special handling/parsing - Comment[RUN] - datafile_key json file need checking for field presence
-                            value = utils.get_hca_value(hca_path, datafile_json, logger, config, warn_of_missing_fields, magetab_label, context)
-                            if magetab_label == 'Comment[RUN]':
-                                # NB. We're stripping e.g. _2.fastq.gz from the end - to retain just the core file name
-                                # Tested on the following types of file names:
-                                # "FCA7167226_I1.fastq.gz", "MantonBM7_HiSeq_4_S19_L005_R2_001.fastq.gz", "E18_20160930_Neurons_Sample_57_S054_L005_I1_010.fastq.gz", "FCA7167226.fastq.gz"
-                                value = re.sub(r"(\_\w\d|\_\w\d\_\d+|\_\d)*\.f\w+\.gz", "", value)
-                            utils.add_to_row(indexes_of_non_empty_sdrf_columns, sdrf_column_headers, magetab_label, value, current_row, characteristic_values, config)
+                                else:
+                                    value = utils.get_val(config, 'notfound')
+                                if magetab_label in \
+                                    ['Characteristics[organism]', 'Characteristics[disease]', 'Characteristics[cell subtype]', 'Characteristics[ethnic group]','Characteristics[strain]'] \
+                                    and value != utils.get_val(config, 'notfound'):
+                                    # Special handling/parsing - organism, disease - could be multiple according to HCA schema
+                                    utils.add_to_row(indexes_of_non_empty_sdrf_columns, sdrf_column_headers, magetab_label, ','.join([x['text'] for x in value]), current_row, characteristic_values, config)
+                                else:
+                                    # magetab_label is not a list or a special case
+                                    utils.add_to_row(indexes_of_non_empty_sdrf_columns, sdrf_column_headers, magetab_label, str(value), current_row, characteristic_values, config)
                         else:
-                            schema_type = hca_path[0]
-                            if schema_type in hca_json_for_bundle:
-                                # Retrieving the first element below follows the assumption of one single json object in schema_type in a bundle
-                                # (all the special cases were handled above)
-                                json_dict = hca_json_for_bundle[schema_type][0]
-                                value = utils.get_hca_value(hca_path[1:], json_dict, logger, config, warn_of_missing_fields, magetab_label, context)
-                            else:
-                                value = utils.get_val(config, 'notfound')
-                            if magetab_label in \
-                                ['Characteristics[organism]', 'Characteristics[disease]', 'Characteristics[cell subtype]', 'Characteristics[ethnic group]','Characteristics[strain]'] \
-                                and value != utils.get_val(config, 'notfound'):
-                                # Special handling/parsing - organism, disease - could be multiple according to HCA schema
-                                utils.add_to_row(indexes_of_non_empty_sdrf_columns, sdrf_column_headers, magetab_label, ','.join([x['text'] for x in value]), current_row, characteristic_values, config)
-                            else:
-                                # magetab_label is not a list or a special case
-                                utils.add_to_row(indexes_of_non_empty_sdrf_columns, sdrf_column_headers, magetab_label, str(value), current_row, characteristic_values, config)
+                            # hca_path is not a list - add to the row as is
+                            utils.add_to_row(indexes_of_non_empty_sdrf_columns, sdrf_column_headers, magetab_label, hca_path, current_row, characteristic_values, config)
+                    # At least one bundle has been seen - the SDRF columns have now been determined
+                    if technology:
+                        # Append current_row to the list of rows in the SDRF file being generated
+                        if technology not in technology2rows.keys():
+                            technology2rows[technology] = []
+                        technology2rows[technology].append(current_row)
+                        # The presence of a technology name in that set acts as a flag that sdrf column headers have been collected for that technology.
+                        if technology not in technologies_found:
+                            technology2sdrf_column_headers[technology] = sdrf_column_headers
+                            # To start off with assume all columns are empty
+                            technology2indexes_of_empty_columns[technology] = range(len(sdrf_config))
+                            # Initialise technology2protocol_type2protocols with new technology
+                            technology2protocol_type2protocols[technology] = OrderedDict()
+                        technologies_found.add(technology)
+                        # Store (without duplicates) for technology the protocols found for bundle_uuid (i.e. those in protocol_type2protocols_in_bundle)
+                        for protocol_type in protocol_type2protocols_in_bundle.keys():
+                            num_protocols_in_bundle = len(protocol_type2protocols_in_bundle[protocol_type])
+                            if num_protocols_in_bundle > 0:
+                                if technology not in technology2protocol_type2max_protocol_num_per_sample.keys():
+                                    technology2protocol_type2max_protocol_num_per_sample[technology] = OrderedDict({ protocol_type : num_protocols_in_bundle })
+                                elif protocol_type not in technology2protocol_type2max_protocol_num_per_sample[technology].keys():
+                                    technology2protocol_type2max_protocol_num_per_sample[technology][protocol_type] = num_protocols_in_bundle
+                                else:
+                                    technology2protocol_type2max_protocol_num_per_sample[technology][protocol_type] = max(num_protocols_in_bundle, technology2protocol_type2max_protocol_num_per_sample[technology][protocol_type])
+                                if protocol_type not in technology2protocol_type2protocols[technology].keys():
+                                    technology2protocol_type2protocols[technology][protocol_type] = OrderedSet([])
+                                # Merge set: protocol_type2protocols_in_bundle[protocol_type] into set already in technology2protocol_type2protocols[technology][protocol_type]
+                                technology2protocol_type2protocols[technology][protocol_type] |= protocol_type2protocols_in_bundle[protocol_type]
                     else:
-                        # hca_path is not a list - add to the row as is
-                        utils.add_to_row(indexes_of_non_empty_sdrf_columns, sdrf_column_headers, magetab_label, hca_path, current_row, characteristic_values, config)
-                # At least one bundle has been seen - the SDRF columns have now been determined
-                if technology:
-                    # Append current_row to the list of rows in the SDRF file being generated
-                    if technology not in technology2rows.keys():
-                        technology2rows[technology] = []
-                    technology2rows[technology].append(current_row)
-                    # The presence of a technology name in that set acts as a flag that sdrf column headers have been collected for that technology.
-                    if technology not in technologies_found:
-                        technology2sdrf_column_headers[technology] = sdrf_column_headers
-                        # To start off with assume all columns are empty
-                        technology2indexes_of_empty_columns[technology] = range(len(sdrf_config))
-                        # Initialise technology2protocol_type2protocols with new technology
-                        technology2protocol_type2protocols[technology] = OrderedDict()
-                    technologies_found.add(technology)
-                    # Store (without duplicates) for technology the protocols found for bundle_uuid (i.e. those in protocol_type2protocols_in_bundle)
-                    for protocol_type in protocol_type2protocols_in_bundle.keys():
-                        num_protocols_in_bundle = len(protocol_type2protocols_in_bundle[protocol_type])
-                        if num_protocols_in_bundle > 0:
-                            if technology not in technology2protocol_type2max_protocol_num_per_sample.keys():
-                                technology2protocol_type2max_protocol_num_per_sample[technology] = OrderedDict({ protocol_type : num_protocols_in_bundle })
-                            elif protocol_type not in technology2protocol_type2max_protocol_num_per_sample[technology].keys():
-                                technology2protocol_type2max_protocol_num_per_sample[technology][protocol_type] = num_protocols_in_bundle
-                            else:
-                                technology2protocol_type2max_protocol_num_per_sample[technology][protocol_type] = max(num_protocols_in_bundle, technology2protocol_type2max_protocol_num_per_sample[technology][protocol_type])
-                            if protocol_type not in technology2protocol_type2protocols[technology].keys():
-                                technology2protocol_type2protocols[technology][protocol_type] = OrderedSet([])
-                            # Merge set: protocol_type2protocols_in_bundle[protocol_type] into set already in technology2protocol_type2protocols[technology][protocol_type]  
-                            technology2protocol_type2protocols[technology][protocol_type] |= protocol_type2protocols_in_bundle[protocol_type]
-                else:
-                    err_msg = "Failed to retrieve valid technology from value: \"%s\" in bundle: %s" % (hca_technology, bundle_url)
-                    logger.error(err_msg)
-                    raise utils.HCA2MagetabTranslationError(err_msg)
+                        err_msg = "Failed to retrieve valid technology from value: \"%s\" in bundle: %s" % (hca_technology, bundle_url)
+                        logger.error(err_msg)
+                        raise utils.HCA2MagetabTranslationError(err_msg)
 
             # Now remove from technology2indexes_of_empty_columns[technology] all column indexes we found non-empty values for, for the current bundle_uuid
             technology2indexes_of_empty_columns[technology] = [x for x in technology2indexes_of_empty_columns[technology] if x not in indexes_of_non_empty_sdrf_columns]
