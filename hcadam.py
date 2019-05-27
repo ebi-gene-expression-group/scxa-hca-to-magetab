@@ -168,6 +168,7 @@ def add_bundle_to_json_cache(bundle, project_uuid, config, logger):
         err_msg = "Failed to retrieve json content for project: %s and bundle url: %s using path: %s" % (project_uuid, bundle_url, '.'.join(hca_files_path))
         logger.error(err_msg)
         raise HCARetrievalError(err_msg)
+
     for file_type in file_type2json_list.keys():
         if re.search(r'\_json$', file_type):
             schema_type = re.sub(r"\_json$", "", file_type)
@@ -179,8 +180,17 @@ def add_bundle_to_json_cache(bundle, project_uuid, config, logger):
             for json_dict in file_type2json_list[file_type]:
                 hca_json_cache[project_uuid][bundle_url][schema_type].append(json_dict)
                 json_files_cnt += 1
-        if violates_hca_schema_assumptions(file_type, hca_json_cache[project_uuid][bundle_url][schema_type], config):
+        # Schema type-level assumption checking
+        if violates_assumption_hca_schemas_with_one_json_per_bundle_expected(file_type, hca_json_cache[project_uuid][bundle_url][schema_type], config):
             logger.warning("File type: %s for project uuid: %s ; bundle url: %s ; violates the assumption that only one json file for that type should exist in a bundle" % (file_type, project_uuid, bundle_url))
+
+    # Bundle-level assumption checking
+    if violates_assumption_hca_schema_types_in_every_bundle(set(hca_json_cache[project_uuid][bundle_url].keys()), config):
+        file_types_in_every_bundle = ','.join(utils.get_val(config, 'hca_file_types_in_every_bundle'))
+        err_msg = "Bundle: %s in project uuid: %s violates the assumption that each bundle should contain _all_ of the following file types: %s" % (bundle_url, project_uuid, file_types_in_every_bundle)
+        logger.error(err_msg)
+        raise HCARetrievalError(err_msg)
+
     return json_files_cnt
 
 # Retrieve a list of all accessions corresponding to project uuid - from project_json of one of project_uuid's bundles in hca_json_cache
@@ -215,10 +225,16 @@ def get_json_for_project_uuid(project_uuid):
     return hca_json_cache[project_uuid]
 
 # Return True if file_type violates our assumption that there should exist only one json file for tha type in a HCA bundle
-def violates_hca_schema_assumptions(schema_type, json_list, config):
+def violates_assumption_hca_schemas_with_one_json_per_bundle_expected(schema_type, json_list, config):
     if schema_type in utils.get_val(config, 'hca_schemas_with_one_json_per_bundle_expected'):
         return len(json_list) > 1
     return False
+
+# Return True if not all HCA file types in hca_file_types_in_every_bundle config can be found in set_of_file_types_in_bundle; Return False otherwise.
+def violates_assumption_hca_schema_types_in_every_bundle(set_of_file_types_in_bundle, config):
+    hca_file_types_in_every_bundle = utils.get_val(config, 'hca_schema_types_in_every_bundle')
+    return len(set_of_file_types_in_bundle.intersection(hca_file_types_in_every_bundle)) != len(hca_file_types_in_every_bundle)
+
 
 # Retrieve a dict in hca_data_structure that corresponds to hca_schema_path. If no such dict is found, return an empty dict
 def get_hca_structure_for_path(hca_schema_path, hca_data_structure):
