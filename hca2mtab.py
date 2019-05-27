@@ -126,11 +126,27 @@ def convert_hca_json_to_magetab(mode, data_dir, project_uuids_filter = None, new
             # Output one SDRF row per each donor - sequence file tuple in the bundle
             # Assumptions relating to donors:
             # 1. Every HCA bundle has at least one json object for both: donor_organism and cell_suspension
-            # 2. In the lists of json objects for donor_organism and cell_suspension respectively,
-            #    the first JSON in donor_organism list corresponds to the first JSON in the cell_suspension list, and so on..
-            cell_suspension_json_iter = iter(hca_json_for_bundle[utils.get_val(config, 'hca_cell_suspension')])
-            for donor_json in hca_json_for_bundle[utils.get_val(config, 'hca_donor_organism')]:
-                cell_suspension_json = cell_suspension_json_iter.__next__()
+            # 2. When multiple donor_organism and cell_suspension json objects exist, in the lists of json objects for donor_organism and
+            #    cell_suspension respectively, the first JSON in donor_organism list corresponds to the first JSON in the cell_suspension list, and so on.
+            #    However, in multi-donor samples with just one cell_suspension json object (e.g. project_uuid: d96c2451-6e22-441f-a3e6-70fd0878bb1b,
+            #    bundle_url: https://dss.data.humancellatlas.org/v1/bundles/fb64e4f9-9a24-4a6a-856f-2b7c0d4f309d?version=2019-01-03T153203.452910Z&replica=aws
+            #    that single cell_suspension json is assumed to apply to all donor_organism json objects in that bundle.
+            donor_json_list = hca_json_for_bundle[utils.get_val(config, 'hca_donor_organism')]
+            cell_suspension_json_list = hca_json_for_bundle[utils.get_val(config, 'hca_cell_suspension')]
+            if len(cell_suspension_json_list) != len(donor_json_list) and len(cell_suspension_json_list) != 1:
+                err_msg = " Project: %s bundle: %s contain multiple donor_organism and cell_suspension jsons, but their number is not the same" % (project_uuid, bundle_url)
+                logger.error(err_msg)
+                raise utils.HCA2MagetabTranslationError(err_msg)
+
+            i = 0
+            while i < len(donor_json_list):
+                donor_json = donor_json_list[i]
+                if len(cell_suspension_json_list) > 1:
+                    cell_suspension_json = cell_suspension_json_list[i]
+                else:
+                    cell_suspension_json = cell_suspension_json_list[0]
+                i += 1
+
                 for datafile_json in hca_json_for_bundle[utils.get_val(config, 'hca_sequence_file')]:
                     sdrf_column_headers = []
 
@@ -457,8 +473,8 @@ if __name__ == '__main__':
 
     mode = sys.argv[1]
     data_dir = sys.argv[2]
-    sender, email_recipients = None, None
-    if len(sys.argv) > 3:
+    sender, email_recipients, project_uuids_filter = None, None, None
+    if len(sys.argv) > 3 and sys.argv[3].strip() != 'None':
         # A comma-separated (no spaces) list of HCA project uuids to be imported
         project_uuids_filter = sys.argv[3].split(',')
     if len(sys.argv) > 4:
